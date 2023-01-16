@@ -25,6 +25,7 @@ namespace OCA\Deck\Service;
 
 use OCA\Deck\Activity\ActivityManager;
 use OCA\Deck\AppInfo\Application;
+use OCA\Deck\Cache\AttachmentCacheHelper;
 use OCA\Deck\Db\Acl;
 use OCA\Deck\Db\Attachment;
 use OCA\Deck\Db\AttachmentMapper;
@@ -33,11 +34,11 @@ use OCA\Deck\Db\ChangeHelper;
 use OCA\Deck\InvalidAttachmentType;
 use OCA\Deck\NoPermissionException;
 use OCA\Deck\NotFoundException;
+use OCA\Deck\Validators\AttachmentServiceValidator;
 use OCP\AppFramework\Http\Response;
 use OCP\AppFramework\IAppContainer;
-use OCP\ICache;
-use OCP\ICacheFactory;
 use OCP\IL10N;
+use OCP\IUserManager;
 use PHPUnit\Framework\MockObject\MockObject;
 use Test\TestCase;
 
@@ -61,16 +62,19 @@ class MyAttachmentService implements IAttachmentService {
 
 class AttachmentServiceTest extends TestCase {
 
+	/** @var IUserManager|MockObject */
+	private $userManager;
 	/** @var AttachmentMapper|MockObject */
 	private $attachmentMapper;
 	/** @var CardMapper|MockObject */
 	private $cardMapper;
 	/** @var PermissionService|MockObject */
 	private $permissionService;
+	/** @var string  */
 	private $userId = 'admin';
 	/** @var Application|MockObject */
 	private $application;
-	private $cacheFactory;
+	private $attachmentCacheHelper;
 	/** @var AttachmentService */
 	private $attachmentService;
 	/** @var MockObject */
@@ -78,8 +82,6 @@ class AttachmentServiceTest extends TestCase {
 	/** @var ActivityManager  */
 	private $activityManager;
 	private $appContainer;
-	/** ICache */
-	private $cache;
 	/** @var IL10N */
 	private $l10n;
 	/** @var ChangeHelper */
@@ -88,6 +90,10 @@ class AttachmentServiceTest extends TestCase {
 	 * @var IAttachmentService|MockObject
 	 */
 	private $filesAppServiceImpl;
+	/**
+	 * @var  AttachmentServiceValidator
+	 */
+	private $attachmentServiceValidator;
 
 	/**
 	 * @throws \OCP\AppFramework\QueryException
@@ -100,18 +106,24 @@ class AttachmentServiceTest extends TestCase {
 
 		$this->appContainer = $this->createMock(IAppContainer::class);
 
+		$this->userManager = $this->createMock(IUserManager::class);
 		$this->attachmentMapper = $this->createMock(AttachmentMapper::class);
 		$this->cardMapper = $this->createMock(CardMapper::class);
 		$this->permissionService = $this->createMock(PermissionService::class);
 		$this->application = $this->createMock(Application::class);
-		$this->cacheFactory = $this->createMock(ICacheFactory::class);
+		$this->attachmentCacheHelper = $this->createMock(AttachmentCacheHelper::class);
 		$this->activityManager = $this->createMock(ActivityManager::class);
 
-		$this->cache = $this->createMock(ICache::class);
-		$this->cacheFactory->expects($this->any())->method('createDistributed')->willReturn($this->cache);
-
-		$this->appContainer->expects($this->at(0))->method('query')->with(FileService::class)->willReturn($this->attachmentServiceImpl);
-		$this->appContainer->expects($this->at(1))->method('query')->with(FilesAppService::class)->willReturn($this->filesAppServiceImpl);
+		$this->appContainer->expects($this->exactly(2))
+			->method('query')
+			->withConsecutive(
+				[FileService::class],
+				[FilesAppService::class]
+			)
+			->willReturnOnConsecutiveCalls(
+				$this->attachmentServiceImpl,
+				$this->filesAppServiceImpl
+			);
 
 		$this->application->expects($this->any())
 			->method('getContainer')
@@ -119,8 +131,21 @@ class AttachmentServiceTest extends TestCase {
 
 		$this->l10n = $this->createMock(IL10N::class);
 		$this->changeHelper = $this->createMock(ChangeHelper::class);
+		$this->attachmentServiceValidator = $this->createMock(AttachmentServiceValidator::class);
 
-		$this->attachmentService = new AttachmentService($this->attachmentMapper, $this->cardMapper, $this->changeHelper, $this->permissionService, $this->application, $this->cacheFactory, $this->userId, $this->l10n, $this->activityManager);
+		$this->attachmentService = new AttachmentService(
+			$this->attachmentMapper,
+			$this->cardMapper,
+			$this->userManager,
+			$this->changeHelper,
+			$this->permissionService,
+			$this->application,
+			$this->attachmentCacheHelper,
+			$this->userId,
+			$this->l10n,
+			$this->activityManager,
+			$this->attachmentServiceValidator
+		);
 	}
 
 	public function testRegisterAttachmentService() {
@@ -129,14 +154,23 @@ class AttachmentServiceTest extends TestCase {
 		$fileServiceMock = $this->createMock(FileService::class);
 		$fileAppServiceMock = $this->createMock(FilesAppService::class);
 
-		$appContainer->expects($this->at(0))->method('query')->with(FileService::class)->willReturn($fileServiceMock);
-		$appContainer->expects($this->at(1))->method('query')->with(FilesAppService::class)->willReturn($fileAppServiceMock);
-		$appContainer->expects($this->at(2))->method('query')->with(MyAttachmentService::class)->willReturn(new MyAttachmentService());
+		$appContainer->expects($this->exactly(3))
+			->method('query')
+			->withConsecutive(
+				[FileService::class],
+				[FilesAppService::class],
+				[MyAttachmentService::class]
+			)
+			->willReturnOnConsecutiveCalls(
+				$fileServiceMock,
+				$fileAppServiceMock,
+				new MyAttachmentService()
+			);
 
 		$application->expects($this->any())
 			->method('getContainer')
 			->willReturn($appContainer);
-		$attachmentService = new AttachmentService($this->attachmentMapper, $this->cardMapper, $this->changeHelper, $this->permissionService, $application, $this->cacheFactory, $this->userId, $this->l10n, $this->activityManager);
+		$attachmentService = new AttachmentService($this->attachmentMapper, $this->cardMapper, $this->userManager, $this->changeHelper, $this->permissionService, $application, $this->attachmentCacheHelper, $this->userId, $this->l10n, $this->activityManager, $this->attachmentServiceValidator);
 		$attachmentService->registerAttachmentService('custom', MyAttachmentService::class);
 		$this->assertEquals($fileServiceMock, $attachmentService->getService('deck_file'));
 		$this->assertEquals(MyAttachmentService::class, get_class($attachmentService->getService('custom')));
@@ -148,13 +182,25 @@ class AttachmentServiceTest extends TestCase {
 		$appContainer = $this->createMock(IAppContainer::class);
 		$fileServiceMock = $this->createMock(FileService::class);
 		$fileAppServiceMock = $this->createMock(FilesAppService::class);
-		$appContainer->expects($this->at(0))->method('query')->with(FileService::class)->willReturn($fileServiceMock);
-		$appContainer->expects($this->at(1))->method('query')->with(FilesAppService::class)->willReturn($fileAppServiceMock);
-		$appContainer->expects($this->at(2))->method('query')->with(MyAttachmentService::class)->willReturn(new MyAttachmentService());
+
+		$appContainer->expects($this->exactly(3))
+			->method('query')
+			->withConsecutive(
+				[FileService::class],
+				[FilesAppService::class],
+				[MyAttachmentService::class]
+			)
+			->willReturnOnConsecutiveCalls(
+				$fileServiceMock,
+				$fileAppServiceMock,
+				new MyAttachmentService()
+			);
+
 		$application->expects($this->any())
 			->method('getContainer')
 			->willReturn($appContainer);
-		$attachmentService = new AttachmentService($this->attachmentMapper, $this->cardMapper, $this->changeHelper, $this->permissionService, $application, $this->cacheFactory, $this->userId, $this->l10n, $this->activityManager);
+
+		$attachmentService = new AttachmentService($this->attachmentMapper, $this->cardMapper, $this->userManager, $this->changeHelper, $this->permissionService, $application, $this->attachmentCacheHelper, $this->userId, $this->l10n, $this->activityManager, $this->attachmentServiceValidator);
 		$attachmentService->registerAttachmentService('custom', MyAttachmentService::class);
 		$attachmentService->getService('deck_file_invalid');
 	}
@@ -176,35 +222,40 @@ class AttachmentServiceTest extends TestCase {
 	public function testFindAll() {
 		$this->mockPermission(Acl::PERMISSION_READ);
 		$attachments = [
-			$this->createAttachment('deck_file','file1'),
-			$this->createAttachment('deck_file','file2'),
-			$this->createAttachment('deck_file_invalid','file3'),
+			$this->createAttachment('deck_file', 'file1'),
+			$this->createAttachment('deck_file', 'file2'),
+			$this->createAttachment('deck_file_invalid', 'file3'),
 		];
 		$this->attachmentMapper->expects($this->once())
 			->method('findAll')
 			->with(123)
 			->willReturn($attachments);
 
-		$this->attachmentServiceImpl->expects($this->at(0))
+		$this->attachmentServiceImpl->expects($this->exactly(2))
 			->method('extendData')
-			->with($attachments[0]);
-		$this->attachmentServiceImpl->expects($this->at(1))
-			->method('extendData')
-			->with($attachments[1]);
+			->withConsecutive(
+				[$attachments[0]],
+				[$attachments[1]],
+			)
+			->willReturnOnConsecutiveCalls(
+				$attachments[0],
+				$attachments[1],
+			);
+
 		$this->assertEquals($attachments, $this->attachmentService->findAll(123, false));
 	}
 
 	public function testFindAllWithDeleted() {
 		$this->mockPermission(Acl::PERMISSION_READ);
 		$attachments = [
-			$this->createAttachment('deck_file','file1'),
-			$this->createAttachment('deck_file','file2'),
-			$this->createAttachment('deck_file_invalid','file3'),
+			$this->createAttachment('deck_file', 'file1'),
+			$this->createAttachment('deck_file', 'file2'),
+			$this->createAttachment('deck_file_invalid', 'file3'),
 		];
 		$attachmentsDeleted = [
-			$this->createAttachment('deck_file','file4'),
-			$this->createAttachment('deck_file','file5'),
-			$this->createAttachment('deck_file_invalid','file6'),
+			$this->createAttachment('deck_file', 'file4'),
+			$this->createAttachment('deck_file', 'file5'),
+			$this->createAttachment('deck_file_invalid', 'file6'),
 		];
 		$this->attachmentMapper->expects($this->once())
 			->method('findAll')
@@ -215,24 +266,27 @@ class AttachmentServiceTest extends TestCase {
 			->with(123, false)
 			->willReturn($attachmentsDeleted);
 
-		$this->attachmentServiceImpl->expects($this->at(0))
+		$this->attachmentServiceImpl->expects($this->exactly(4))
 			->method('extendData')
-			->with($attachments[0]);
-		$this->attachmentServiceImpl->expects($this->at(1))
-			->method('extendData')
-			->with($attachments[1]);
+			->withConsecutive(
+				[$attachments[0]],
+				[$attachments[1]],
+				[$attachmentsDeleted[0]],
+				[$attachmentsDeleted[1]]
+			);
+
 		$this->assertEquals(array_merge($attachments, $attachmentsDeleted), $this->attachmentService->findAll(123, true));
 	}
 
 	public function testCount() {
-		$this->cache->expects($this->once())->method('get')->with('card-123')->willReturn(null);
+		$this->attachmentCacheHelper->expects($this->once())->method('getAttachmentCount')->with(123)->willReturn(null);
 		$this->attachmentMapper->expects($this->once())->method('findAll')->willReturn([1,2,3,4]);
-		$this->cache->expects($this->once())->method('set')->with('card-123', 4)->willReturn(null);
+		$this->attachmentCacheHelper->expects($this->once())->method('setAttachmentCount')->with(123, 4);
 		$this->assertEquals(4, $this->attachmentService->count(123));
 	}
 
 	public function testCountCacheHit() {
-		$this->cache->expects($this->once())->method('get')->with('card-123')->willReturn(4);
+		$this->attachmentCacheHelper->expects($this->once())->method('getAttachmentCount')->with(123)->willReturn(4);
 		$this->assertEquals(4, $this->attachmentService->count(123));
 	}
 
@@ -240,7 +294,7 @@ class AttachmentServiceTest extends TestCase {
 		$attachment = $this->createAttachment('deck_file', 'file_name.jpg');
 		$expected = $this->createAttachment('deck_file', 'file_name.jpg');
 		$this->mockPermission(Acl::PERMISSION_EDIT);
-		$this->cache->expects($this->once())->method('clear')->with('card-123');
+		$this->attachmentCacheHelper->expects($this->once())->method('clearAttachmentCount')->with(123);
 		$this->attachmentServiceImpl->expects($this->once())
 			->method('create');
 		$this->attachmentMapper->expects($this->once())
@@ -254,7 +308,14 @@ class AttachmentServiceTest extends TestCase {
 
 		$actual = $this->attachmentService->create(123, 'deck_file', 'file_name.jpg');
 
-		$expected->setExtendedData(['mime' => 'image/jpeg']);
+		$expected->setExtendedData([
+			'mime' => 'image/jpeg',
+			'attachmentCreator' => [
+				'displayName' => '',
+				'id' => '',
+				'email' => null,
+			],
+		]);
 		$this->assertEquals($expected, $actual);
 	}
 
@@ -293,7 +354,7 @@ class AttachmentServiceTest extends TestCase {
 		$attachment = $this->createAttachment('deck_file', 'file_name.jpg');
 		$expected = $this->createAttachment('deck_file', 'file_name.jpg');
 		$this->mockPermission(Acl::PERMISSION_EDIT);
-		$this->cache->expects($this->once())->method('clear')->with('card-123');
+		$this->attachmentCacheHelper->expects($this->once())->method('clearAttachmentCount')->with(1);
 		$this->attachmentMapper->expects($this->once())
 			->method('find')
 			->with(1)
@@ -311,7 +372,14 @@ class AttachmentServiceTest extends TestCase {
 
 		$actual = $this->attachmentService->update(1, 1, 'file_name.jpg');
 
-		$expected->setExtendedData(['mime' => 'image/jpeg']);
+		$expected->setExtendedData([
+			'mime' => 'image/jpeg',
+			'attachmentCreator' => [
+				'displayName' => '',
+				'id' => '',
+				'email' => null,
+			],
+		]);
 		$expected->setLastModified($attachment->getLastModified());
 		$this->assertEquals($expected, $actual);
 	}
@@ -320,7 +388,7 @@ class AttachmentServiceTest extends TestCase {
 		$attachment = $this->createAttachment('deck_file', 'file_name.jpg');
 		$expected = $this->createAttachment('deck_file', 'file_name.jpg');
 		$this->mockPermission(Acl::PERMISSION_EDIT);
-		$this->cache->expects($this->once())->method('clear')->with('card-123');
+		$this->attachmentCacheHelper->expects($this->once())->method('clearAttachmentCount')->with(1);
 		$this->attachmentMapper->expects($this->once())
 			->method('find')
 			->with(1)
@@ -341,7 +409,7 @@ class AttachmentServiceTest extends TestCase {
 		$attachment = $this->createAttachment('deck_file', 'file_name.jpg');
 		$expected = $this->createAttachment('deck_file', 'file_name.jpg');
 		$this->mockPermission(Acl::PERMISSION_EDIT);
-		$this->cache->expects($this->once())->method('clear')->with('card-123');
+		$this->attachmentCacheHelper->expects($this->once())->method('clearAttachmentCount')->with(1);
 		$this->attachmentMapper->expects($this->once())
 			->method('find')
 			->with(1)
@@ -366,7 +434,7 @@ class AttachmentServiceTest extends TestCase {
 		$attachment = $this->createAttachment('deck_file', 'file_name.jpg');
 		$expected = $this->createAttachment('deck_file', 'file_name.jpg');
 		$this->mockPermission(Acl::PERMISSION_EDIT);
-		$this->cache->expects($this->once())->method('clear')->with('card-123');
+		$this->attachmentCacheHelper->expects($this->once())->method('clearAttachmentCount')->with(1);
 		$this->attachmentMapper->expects($this->once())
 			->method('find')
 			->with(1)
@@ -387,7 +455,7 @@ class AttachmentServiceTest extends TestCase {
 		$attachment = $this->createAttachment('deck_file', 'file_name.jpg');
 		$expected = $this->createAttachment('deck_file', 'file_name.jpg');
 		$this->mockPermission(Acl::PERMISSION_EDIT);
-		$this->cache->expects($this->once())->method('clear')->with('card-123');
+		$this->attachmentCacheHelper->expects($this->once())->method('clearAttachmentCount')->with(1);
 		$this->attachmentMapper->expects($this->once())
 			->method('find')
 			->with(1)
@@ -396,5 +464,6 @@ class AttachmentServiceTest extends TestCase {
 			->method('allowUndo')
 			->willReturn(false);
 		$actual = $this->attachmentService->restore(1, 1);
+		$this->assertEquals($expected, $actual);
 	}
 }

@@ -29,6 +29,7 @@ use OCA\Deck\Db\Acl;
 use OCA\Deck\Db\LabelMapper;
 use OCA\Deck\StatusException;
 use OCA\Deck\BadRequestException;
+use OCA\Deck\Validators\LabelServiceValidator;
 
 class LabelService {
 
@@ -40,12 +41,21 @@ class LabelService {
 	private $boardService;
 	/** @var ChangeHelper */
 	private $changeHelper;
+	/** @var LabelServiceValidator */
+	private LabelServiceValidator $labelServiceValidator;
 
-	public function __construct(LabelMapper $labelMapper, PermissionService $permissionService, BoardService $boardService, ChangeHelper $changeHelper) {
+	public function __construct(
+		LabelMapper $labelMapper,
+		PermissionService $permissionService,
+		BoardService $boardService,
+		ChangeHelper $changeHelper,
+		LabelServiceValidator $labelServiceValidator
+		) {
 		$this->labelMapper = $labelMapper;
 		$this->permissionService = $permissionService;
 		$this->boardService = $boardService;
 		$this->changeHelper = $changeHelper;
+		$this->labelServiceValidator = $labelServiceValidator;
 	}
 
 	/**
@@ -76,27 +86,15 @@ class LabelService {
 	 * @throws BadRequestException
 	 */
 	public function create($title, $color, $boardId) {
-		if ($title === false || $title === null) {
-			throw new BadRequestException('title must be provided');
-		}
-
-		if ($color === false || $color === null) {
-			throw new BadRequestException('color must be provided');
-		}
-
-		if (is_numeric($boardId) === false) {
-			throw new BadRequestException('board id must be a number');
-		}
+		$this->labelServiceValidator->check(compact('title', 'color', 'boardId'));
 
 		$this->permissionService->checkPermission(null, $boardId, Acl::PERMISSION_MANAGE);
 
 		$boardLabels = $this->labelMapper->findAll($boardId);
-		if (\is_array($boardLabels)) {
-			foreach ($boardLabels as $boardLabel) {
-				if ($boardLabel->getTitle() === $title) {
-					throw new BadRequestException('title must be unique');
-					break;
-				}
+		foreach ($boardLabels as $boardLabel) {
+			if ($boardLabel->getTitle() === $title) {
+				throw new BadRequestException('title must be unique');
+				break;
 			}
 		}
 
@@ -121,9 +119,7 @@ class LabelService {
 	 * @throws BadRequestException
 	 */
 	public function delete($id) {
-		if (is_numeric($id) === false) {
-			throw new BadRequestException('label id must be a number');
-		}
+		$this->labelServiceValidator->check(compact('id'));
 
 		$this->permissionService->checkPermission($this->labelMapper, $id, Acl::PERMISSION_MANAGE);
 		if ($this->boardService->isArchived($this->labelMapper, $id)) {
@@ -146,32 +142,20 @@ class LabelService {
 	 * @throws BadRequestException
 	 */
 	public function update($id, $title, $color) {
-		if (is_numeric($id) === false) {
-			throw new BadRequestException('label id must be a number');
-		}
-
-		if ($title === false || $title === null || $title === "") {
-			throw new BadRequestException('title must be provided');
-		}
-
-		if ($color === false || $color === null) {
-			throw new BadRequestException('color must be provided');
-		}
+		$this->labelServiceValidator->check(compact('title', 'color', 'id'));
 
 		$this->permissionService->checkPermission($this->labelMapper, $id, Acl::PERMISSION_MANAGE);
 
 		$label = $this->find($id);
 
 		$boardLabels = $this->labelMapper->findAll($label->getBoardId());
-		if (\is_array($boardLabels)) {
-			foreach ($boardLabels as $boardLabel) {
-				if ($boardLabel->getId() === $label->getId()) {
-					continue;
-				}
-				if ($boardLabel->getTitle() === $title) {
-					throw new BadRequestException('title must be unique');
-					break;
-				}
+		foreach ($boardLabels as $boardLabel) {
+			if ($boardLabel->getId() === $label->getId()) {
+				continue;
+			}
+			if ($boardLabel->getTitle() === $title) {
+				throw new BadRequestException('title must be unique');
+				break;
 			}
 		}
 

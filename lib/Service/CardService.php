@@ -37,31 +37,40 @@ use OCA\Deck\Db\StackMapper;
 use OCA\Deck\Event\CardCreatedEvent;
 use OCA\Deck\Event\CardDeletedEvent;
 use OCA\Deck\Event\CardUpdatedEvent;
+use OCA\Deck\NoPermissionException;
 use OCA\Deck\Notification\NotificationHelper;
 use OCA\Deck\Db\BoardMapper;
 use OCA\Deck\Db\LabelMapper;
 use OCA\Deck\StatusException;
 use OCA\Deck\BadRequestException;
+use OCA\Deck\Validators\CardServiceValidator;
 use OCP\Comments\ICommentsManager;
 use OCP\EventDispatcher\IEventDispatcher;
+use OCP\IRequest;
 use OCP\IUserManager;
+use OCP\IURLGenerator;
+use Psr\Log\LoggerInterface;
 
 class CardService {
-	private $cardMapper;
-	private $stackMapper;
-	private $boardMapper;
-	private $labelMapper;
-	private $permissionService;
-	private $boardService;
-	private $notificationHelper;
-	private $assignedUsersMapper;
-	private $attachmentService;
-	private $currentUser;
-	private $activityManager;
-	private $commentsManager;
-	private $changeHelper;
-	private $eventDispatcher;
-	private $userManager;
+	private CardMapper $cardMapper;
+	private StackMapper $stackMapper;
+	private BoardMapper $boardMapper;
+	private LabelMapper $labelMapper;
+	private PermissionService $permissionService;
+	private BoardService $boardService;
+	private NotificationHelper $notificationHelper;
+	private AssignmentMapper $assignedUsersMapper;
+	private AttachmentService $attachmentService;
+	private ?string $currentUser;
+	private ActivityManager $activityManager;
+	private ICommentsManager $commentsManager;
+	private ChangeHelper $changeHelper;
+	private IEventDispatcher $eventDispatcher;
+	private IUserManager $userManager;
+	private IURLGenerator $urlGenerator;
+	private LoggerInterface $logger;
+	private IRequest $request;
+	private CardServiceValidator $cardServiceValidator;
 
 	public function __construct(
 		CardMapper $cardMapper,
@@ -78,7 +87,11 @@ class CardService {
 		IUserManager $userManager,
 		ChangeHelper $changeHelper,
 		IEventDispatcher $eventDispatcher,
-		$userId
+		IURLGenerator $urlGenerator,
+		LoggerInterface $logger,
+		IRequest $request,
+		CardServiceValidator $cardServiceValidator,
+		?string $userId
 	) {
 		$this->cardMapper = $cardMapper;
 		$this->stackMapper = $stackMapper;
@@ -95,6 +108,10 @@ class CardService {
 		$this->changeHelper = $changeHelper;
 		$this->eventDispatcher = $eventDispatcher;
 		$this->currentUser = $userId;
+		$this->urlGenerator = $urlGenerator;
+		$this->logger = $logger;
+		$this->request = $request;
+		$this->cardServiceValidator = $cardServiceValidator;
 	}
 
 	public function enrich($card) {
@@ -109,7 +126,7 @@ class CardService {
 		$countComments = $this->commentsManager->getNumberOfCommentsForObject('deckCard', (string)$card->getId());
 		$card->setCommentsUnread($countUnreadComments);
 		$card->setCommentsCount($countComments);
-		
+
 		$stack = $this->stackMapper->find($card->getStackId());
 		$board = $this->boardService->find($stack->getBoardId());
 		$card->setRelatedStack($stack);
@@ -117,6 +134,7 @@ class CardService {
 	}
 
 	public function fetchDeleted($boardId) {
+		$this->cardServiceValidator->check(compact('boardId'));
 		$this->permissionService->checkPermission($this->boardMapper, $boardId, Acl::PERMISSION_READ);
 		$cards = $this->cardMapper->findDeleted($boardId);
 		foreach ($cards as $card) {
@@ -126,23 +144,18 @@ class CardService {
 	}
 
 	/**
-	 * @param $cardId
 	 * @return \OCA\Deck\Db\RelationalEntity
 	 * @throws \OCA\Deck\NoPermissionException
 	 * @throws \OCP\AppFramework\Db\DoesNotExistException
 	 * @throws \OCP\AppFramework\Db\MultipleObjectsReturnedException
 	 * @throws BadRequestException
 	 */
-	public function find($cardId) {
-		if (is_numeric($cardId) === false) {
-			throw new BadRequestException('card id must be a number');
-		}
-
+	public function find(int $cardId) {
 		$this->permissionService->checkPermission($this->cardMapper, $cardId, Acl::PERMISSION_READ);
 		$card = $this->cardMapper->find($cardId);
 		$assignedUsers = $this->assignedUsersMapper->findAll($card->getId());
 		$attachments = $this->attachmentService->findAll($cardId, true);
-		if (\OC::$server->getRequest()->getParam('apiVersion') === '1.0') {
+		if ($this->request->getParam('apiVersion') === '1.0') {
 			$attachments = array_filter($attachments, function ($attachment) {
 				return $attachment->getType() === 'deck_file';
 			});
@@ -154,7 +167,12 @@ class CardService {
 	}
 
 	public function findCalendarEntries($boardId) {
-		$this->permissionService->checkPermission($this->boardMapper, $boardId, Acl::PERMISSION_READ);
+		try {
+			$this->permissionService->checkPermission($this->boardMapper, $boardId, Acl::PERMISSION_READ);
+		} catch (NoPermissionException $e) {
+			$this->logger->error('Unable to check permission for a previously obtained board ' . $boardId, ['exception' => $e]);
+			return [];
+		}
 		$cards = $this->cardMapper->findCalendarEntries($boardId);
 		foreach ($cards as $card) {
 			$this->enrich($card);
@@ -177,29 +195,7 @@ class CardService {
 	 * @throws BadrequestException
 	 */
 	public function create($title, $stackId, $type, $order, $owner, $description = '', $duedate = null) {
-		if ($title === 'false' || $title === null) {
-			throw new BadRequestException('title must be provided');
-		}
-
-		if (mb_strlen($title) > Card::TITLE_MAX_LENGTH) {
-			throw new BadRequestException('The title cannot exceed 255 characters');
-		}
-
-		if (is_numeric($stackId) === false) {
-			throw new BadRequestException('stack id must be a number');
-		}
-
-		if ($type === 'false' || $type === null) {
-			throw new BadRequestException('type must be provided');
-		}
-
-		if (is_numeric($order) === false) {
-			throw new BadRequestException('order must be a number');
-		}
-
-		if ($owner === false || $owner === null) {
-			throw new BadRequestException('owner must be provided');
-		}
+		$this->cardServiceValidator->check(compact('title', 'stackId', 'type', 'order', 'owner'));
 
 		$this->permissionService->checkPermission($this->stackMapper, $stackId, Acl::PERMISSION_EDIT);
 		if ($this->boardService->isArchived($this->stackMapper, $stackId)) {
@@ -214,7 +210,7 @@ class CardService {
 		$card->setDescription($description);
 		$card->setDuedate($duedate);
 		$card = $this->cardMapper->insert($card);
-		
+
 		$this->activityManager->triggerEvent(ActivityManager::DECK_OBJECT_CARD, $card, ActivityManager::SUBJECT_CARD_CREATE);
 		$this->changeHelper->cardChanged($card->getId(), false);
 		$this->eventDispatcher->dispatchTyped(new CardCreatedEvent($card));
@@ -243,7 +239,7 @@ class CardService {
 		$card = $this->cardMapper->find($id);
 		$card->setDeletedAt(time());
 		$this->cardMapper->update($card);
-		
+
 		$this->activityManager->triggerEvent(ActivityManager::DECK_OBJECT_CARD, $card, ActivityManager::SUBJECT_CARD_DELETE);
 		$this->notificationHelper->markDuedateAsRead($card);
 		$this->changeHelper->cardChanged($card->getId(), false);
@@ -269,29 +265,7 @@ class CardService {
 	 * @throws BadRequestException
 	 */
 	public function update($id, $title, $stackId, $type, $owner, $description = '', $order = 0, $duedate = null, $deletedAt = null, $archived = null) {
-		if (is_numeric($id) === false) {
-			throw new BadRequestException('card id must be a number');
-		}
-
-		if ($title === false || $title === null) {
-			throw new BadRequestException('title must be provided');
-		}
-
-		if (mb_strlen($title) > Card::TITLE_MAX_LENGTH) {
-			throw new BadRequestException('The title cannot exceed 255 characters');
-		}
-
-		if (is_numeric($stackId) === false) {
-			throw new BadRequestException('stack id must be a number $$$');
-		}
-
-		if ($type === false || $type === null) {
-			throw new BadRequestException('type must be provided');
-		}
-
-		if ($owner === false || $owner === null) {
-			throw new BadRequestException('owner must be provided');
-		}
+		$this->cardServiceValidator->check(compact('id', 'title', 'stackId', 'type', 'owner', 'order'));
 
 		$this->permissionService->checkPermission($this->cardMapper, $id, Acl::PERMISSION_EDIT);
 		$this->permissionService->checkPermission($this->stackMapper, $stackId, Acl::PERMISSION_EDIT);
@@ -324,11 +298,11 @@ class CardService {
 		$card->setType($type);
 		$card->setOrder($order);
 		$card->setOwner($owner);
-		$card->setDuedate($duedate);
+		$card->setDuedate($duedate ? new \DateTime($duedate) : null);
 		$resetDuedateNotification = false;
 		if (
 			$card->getDuedate() === null ||
-			(new \DateTime($card->getDuedate())) != (new \DateTime($changes->getBefore()->getDuedate()))
+			($card->getDuedate()) != ($changes->getBefore()->getDuedate())
 		) {
 			$card->setNotified(false);
 			$resetDuedateNotification = true;
@@ -374,17 +348,7 @@ class CardService {
 	 * @throws BadRequestException
 	 */
 	public function rename($id, $title) {
-		if (is_numeric($id) === false) {
-			throw new BadRequestException('id must be a number');
-		}
-
-		if ($title === false || $title === null) {
-			throw new BadRequestException('title must be provided');
-		}
-
-		if (mb_strlen($title) > Card::TITLE_MAX_LENGTH) {
-			throw new BadRequestException('The title cannot exceed 255 characters');
-		}
+		$this->cardServiceValidator->check(compact('id', 'title'));
 
 		$this->permissionService->checkPermission($this->cardMapper, $id, Acl::PERMISSION_EDIT);
 		if ($this->boardService->isArchived($this->cardMapper, $id)) {
@@ -415,17 +379,8 @@ class CardService {
 	 * @throws BadRequestException
 	 */
 	public function reorder($id, $stackId, $order) {
-		if (is_numeric($id) === false) {
-			throw new BadRequestException('card id must be a number');
-		}
+		$this->cardServiceValidator->check(compact('id', 'stackId', 'order'));
 
-		if (is_numeric($stackId) === false) {
-			throw new BadRequestException('stack id must be a number');
-		}
-
-		if (is_numeric($order) === false) {
-			throw new BadRequestException('order must be a number');
-		}
 
 		$this->permissionService->checkPermission($this->cardMapper, $id, Acl::PERMISSION_EDIT);
 		$this->permissionService->checkPermission($this->stackMapper, $stackId, Acl::PERMISSION_EDIT);
@@ -476,13 +431,12 @@ class CardService {
 	 * @throws StatusException
 	 * @throws \OCA\Deck\NoPermissionException
 	 * @throws \OCP\AppFramework\Db\DoesNotExistException
-	 * @throws \OCP\AppFramework\Db\
+	 * @throws \OCP\AppFramework\Db\MultipleObjectsReturnedException
 	 * @throws BadRequestException
 	 */
 	public function archive($id) {
-		if (is_numeric($id) === false) {
-			throw new BadRequestException('id must be a number');
-		}
+		$this->cardServiceValidator->check(compact('id'));
+
 
 		$this->permissionService->checkPermission($this->cardMapper, $id, Acl::PERMISSION_EDIT);
 		if ($this->boardService->isArchived($this->cardMapper, $id)) {
@@ -510,9 +464,8 @@ class CardService {
 	 * @throws BadRequestException
 	 */
 	public function unarchive($id) {
-		if (is_numeric($id) === false) {
-			throw new BadRequestException('id must be a number');
-		}
+		$this->cardServiceValidator->check(compact('id'));
+
 
 		$this->permissionService->checkPermission($this->cardMapper, $id, Acl::PERMISSION_EDIT);
 		if ($this->boardService->isArchived($this->cardMapper, $id)) {
@@ -539,13 +492,8 @@ class CardService {
 	 * @throws BadRequestException
 	 */
 	public function assignLabel($cardId, $labelId) {
-		if (is_numeric($cardId) === false) {
-			throw new BadRequestException('card id must be a number');
-		}
+		$this->cardServiceValidator->check(compact('cardId', 'labelId'));
 
-		if (is_numeric($labelId) === false) {
-			throw new BadRequestException('label id must be a number');
-		}
 
 		$this->permissionService->checkPermission($this->cardMapper, $cardId, Acl::PERMISSION_EDIT);
 		if ($this->boardService->isArchived($this->cardMapper, $cardId)) {
@@ -573,13 +521,8 @@ class CardService {
 	 * @throws BadRequestException
 	 */
 	public function removeLabel($cardId, $labelId) {
-		if (is_numeric($cardId) === false) {
-			throw new BadRequestException('card id must be a number');
-		}
+		$this->cardServiceValidator->check(compact('cardId', 'labelId'));
 
-		if (is_numeric($labelId) === false) {
-			throw new BadRequestException('label id must be a number');
-		}
 
 		$this->permissionService->checkPermission($this->cardMapper, $cardId, Acl::PERMISSION_EDIT);
 		if ($this->boardService->isArchived($this->cardMapper, $cardId)) {
@@ -595,5 +538,15 @@ class CardService {
 		$this->activityManager->triggerEvent(ActivityManager::DECK_OBJECT_CARD, $card, ActivityManager::SUBJECT_LABEL_UNASSING, ['label' => $label]);
 
 		$this->eventDispatcher->dispatchTyped(new CardUpdatedEvent($card));
+	}
+
+	public function getCardUrl($cardId) {
+		$boardId = $this->cardMapper->findBoardId($cardId);
+
+		return $this->urlGenerator->linkToRouteAbsolute('deck.page.index') . "#/board/$boardId/card/$cardId";
+	}
+
+	public function getRedirectUrlForCard($cardId) {
+		return $this->urlGenerator->linkToRouteAbsolute('deck.page.index') . "card/$cardId";
 	}
 }

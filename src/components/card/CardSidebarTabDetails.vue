@@ -27,7 +27,7 @@
 				<span class="hidden-visually">{{ t('deck', 'Tags') }}</span>
 			</div>
 			<div class="section-details">
-				<Multiselect v-model="assignedLabels"
+				<NcMultiselect v-model="assignedLabels"
 					:multiple="true"
 					:disabled="!canEdit"
 					:options="labelsSorted"
@@ -36,7 +36,8 @@
 					label="title"
 					track-by="id"
 					@select="addLabelToCard"
-					@remove="removeLabelFromCard">
+					@remove="removeLabelFromCard"
+					@tag="addLabelToBoardAndCard">
 					<template #option="scope">
 						<div :style="{ backgroundColor: '#' + scope.option.color, color: textColor(scope.option.color)}" class="tag">
 							{{ scope.option.title }}
@@ -47,7 +48,7 @@
 							{{ scope.option.title }}
 						</div>
 					</template>
-				</Multiselect>
+				</NcMultiselect>
 			</div>
 		</div>
 
@@ -56,7 +57,7 @@
 				<span class="hidden-visually">{{ t('deck', 'Assign to users/groups/circles') }}</span>
 			</div>
 			<div class="section-details">
-				<Multiselect v-if="canEdit"
+				<NcMultiselect v-if="canEdit"
 					v-model="assignedUsers"
 					:multiple="true"
 					:options="formatedAssignables"
@@ -69,16 +70,16 @@
 					@remove="removeUserFromCard">
 					<template #tag="scope">
 						<div class="avatarlist--inline">
-							<Avatar :user="scope.option.uid"
+							<NcAvatar :user="scope.option.uid"
 								:display-name="scope.option.displayname"
 								:size="24"
 								:is-no-user="scope.option.isNoUser"
 								:disable-menu="true" />
 						</div>
 					</template>
-				</Multiselect>
+				</NcMultiselect>
 				<div v-else class="avatar-list--readonly">
-					<Avatar v-for="option in assignedUsers"
+					<NcAvatar v-for="option in assignedUsers"
 						:key="option.primaryKey"
 						:user="option.uid"
 						:display-name="option.displayname"
@@ -93,7 +94,7 @@
 				<span class="hidden-visually">{{ t('deck', 'Due date') }}</span>
 			</div>
 			<div class="section-details">
-				<DatetimePicker v-model="duedate"
+				<NcDatetimePicker v-model="duedate"
 					:placeholder="t('deck', 'Set a due date')"
 					type="datetime"
 					:minute-step="5"
@@ -103,15 +104,15 @@
 					:disabled="saving || !canEdit"
 					:shortcuts="shortcuts"
 					confirm />
-				<Actions v-if="canEdit">
-					<ActionButton v-if="copiedCard.duedate" icon="icon-delete" @click="removeDue()">
+				<NcActions v-if="canEdit">
+					<NcActionButton v-if="copiedCard.duedate" icon="icon-delete" @click="removeDue()">
 						{{ t('deck', 'Remove due date') }}
-					</ActionButton>
-				</Actions>
+					</NcActionButton>
+				</NcActions>
 			</div>
 		</div>
 
-		<div class="section-wrapper">
+		<div v-if="projectsEnabled" class="section-wrapper">
 			<CollectionList v-if="card.id"
 				:id="`${card.id}`"
 				:name="card.title"
@@ -125,27 +126,28 @@
 <script>
 import { mapState, mapGetters } from 'vuex'
 import moment from '@nextcloud/moment'
-import { Avatar, Actions, ActionButton, Multiselect, DatetimePicker } from '@nextcloud/vue'
+import { NcAvatar, NcActions, NcActionButton, NcMultiselect, NcDatetimePicker } from '@nextcloud/vue'
+import { loadState } from '@nextcloud/initial-state'
 
 import { CollectionList } from 'nextcloud-vue-collections'
-import Color from '../../mixins/color'
+import Color from '../../mixins/color.js'
 import {
 	getLocale,
 	getDayNamesMin,
 	getFirstDay,
 	getMonthNamesShort,
 } from '@nextcloud/l10n'
-import Description from './Description'
+import Description from './Description.vue'
 
 export default {
 	name: 'CardSidebarTabDetails',
 	components: {
 		Description,
-		Multiselect,
-		DatetimePicker,
-		Actions,
-		ActionButton,
-		Avatar,
+		NcMultiselect,
+		NcDatetimePicker,
+		NcActions,
+		NcActionButton,
+		NcAvatar,
 		CollectionList,
 	},
 	mixins: [Color],
@@ -163,6 +165,7 @@ export default {
 			copiedCard: null,
 			assignedLabels: null,
 			locale: getLocale(),
+			projectsEnabled: loadState('core', 'projects_enabled', false),
 			lang: {
 				days: getDayNamesMin(),
 				months: getMonthNamesShort(),
@@ -224,7 +227,6 @@ export default {
 	computed: {
 		...mapState({
 			currentBoard: state => state.currentBoard,
-			cardDetailsInModal: state => state.cardDetailsInModal,
 		}),
 		...mapGetters(['canEdit', 'assignables']),
 		formatedAssignables() {
@@ -249,6 +251,14 @@ export default {
 
 				return assignable
 			})
+		},
+		cardDetailsInModal: {
+			get() {
+				return this.$store.getters.config('cardDetailsInModal')
+			},
+			set(newValue) {
+				this.$store.dispatch('setConfig', { cardDetailsInModal: newValue })
+			},
 		},
 		duedate: {
 			get() {
@@ -333,8 +343,18 @@ export default {
 			this.$store.dispatch('addLabel', data)
 		},
 
-		removeLabelFromCard(removedLabel) {
+		async addLabelToBoardAndCard(name) {
+			const newLabel = await this.$store.dispatch('addLabelToCurrentBoardAndCard', {
+				card: this.copiedCard,
+				newLabel: {
+					title: name,
+					color: this.randomColor(),
+				},
+			})
+			this.assignedLabels.push(newLabel)
+		},
 
+		removeLabelFromCard(removedLabel) {
 			const removeIndex = this.copiedCard.labels.findIndex((label) => {
 				return label.id === removedLabel.id
 			})
@@ -359,11 +379,11 @@ export default {
 </script>
 <style lang="scss" scoped>
 
-.section-wrapper::v-deep .mx-datepicker-main.mx-datepicker-popup {
+.section-wrapper:deep(.mx-datepicker-main.mx-datepicker-popup) {
 	left: 0 !important;
 }
 
-.section-wrapper::v-deep .mx-datepicker-main.mx-datepicker-popup.mx-datepicker-sidebar {
+.section-wrapper:deep(.mx-datepicker-main.mx-datepicker-popup.mx-datepicker-sidebar) {
 	padding: 0 !important;
 }
 
@@ -381,9 +401,11 @@ export default {
 
 	.section-details {
 		flex-grow: 1;
+		display: flex;
+		flex-wrap: wrap;
 
 		button.action-item--single {
-			margin-top: -6px;
+			margin-top: -3px;
 		}
 	}
 }
@@ -402,7 +424,7 @@ export default {
 	padding: 6px
 }
 
-.section-details::v-deep .multiselect__tags-wrap {
+.section-details:deep(.multiselect__tags-wrap) {
 	flex-wrap: wrap;
 }
 
@@ -419,11 +441,11 @@ export default {
 	}
 }
 
-.multiselect::v-deep .multiselect__tags-wrap {
+.multiselect:deep(.multiselect__tags-wrap) {
 	z-index: 2;
 }
 
-.multiselect.multiselect--active::v-deep .multiselect__tags-wrap {
+.multiselect.multiselect--active:deep(.multiselect__tags-wrap) {
 	z-index: 0;
 }
 

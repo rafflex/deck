@@ -24,25 +24,35 @@
 
 namespace OCA\Deck\Cron;
 
-use OC\BackgroundJob\Job;
+use OCP\AppFramework\Utility\ITimeFactory;
+use OCP\BackgroundJob\TimedJob;
 use OCA\Deck\Db\AttachmentMapper;
 use OCA\Deck\Db\BoardMapper;
+use OCA\Deck\Db\CardMapper;
 use OCA\Deck\InvalidAttachmentType;
 use OCA\Deck\Service\AttachmentService;
+use OCP\BackgroundJob\IJob;
 
-class DeleteCron extends Job {
+class DeleteCron extends TimedJob {
 
 	/** @var BoardMapper */
 	private $boardMapper;
+	/** @var CardMapper */
+	private $cardMapper;
 	/** @var AttachmentService */
 	private $attachmentService;
 	/** @var AttachmentMapper */
 	private $attachmentMapper;
 
-	public function __construct(BoardMapper $boardMapper, AttachmentService $attachmentService, AttachmentMapper $attachmentMapper) {
+	public function __construct(ITimeFactory $time, BoardMapper $boardMapper, CardMapper $cardMapper, AttachmentService $attachmentService, AttachmentMapper $attachmentMapper) {
+		parent::__construct($time);
 		$this->boardMapper = $boardMapper;
+		$this->cardMapper = $cardMapper;
 		$this->attachmentService = $attachmentService;
 		$this->attachmentMapper = $attachmentMapper;
+
+		$this->setInterval(60 * 60 * 24);
+		$this->setTimeSensitivity(IJob::TIME_INSENSITIVE);
 	}
 
 	/**
@@ -53,6 +63,12 @@ class DeleteCron extends Job {
 		$boards = $this->boardMapper->findToDelete();
 		foreach ($boards as $board) {
 			$this->boardMapper->delete($board);
+		}
+
+		$timeLimit = time() - (60 * 5); // 5 min buffer
+		$cards = $this->cardMapper->findToDelete($timeLimit, 500);
+		foreach ($cards as $card) {
+			$this->cardMapper->delete($card);
 		}
 
 		$attachments = $this->attachmentMapper->findToDelete();

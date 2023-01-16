@@ -38,6 +38,7 @@ use OCP\IUser;
 use OCP\IUserManager;
 use OCP\Notification\IManager;
 
+/** @template-extends QBMapper<Card> */
 class CardMapper extends QBMapper implements IPermissionMapper {
 
 	/** @var LabelMapper */
@@ -177,6 +178,17 @@ class CardMapper extends QBMapper implements IPermissionMapper {
 		return $qb;
 	}
 
+	public function findToDelete($timeLimit, $limit = null) {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('id', 'title', 'owner', 'archived', 'deleted_at', 'last_modified')
+			->from('deck_cards')
+			->where($qb->expr()->gt('deleted_at', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->lt('deleted_at', $qb->createNamedParameter($timeLimit, IQueryBuilder::PARAM_INT)))
+			->orderBy('deleted_at')
+			->setMaxResults($limit);
+		return $this->findEntities($qb);
+	}
+
 	public function findDeleted($boardId, $limit = null, $offset = null) {
 		$qb = $this->queryCardsByBoard($boardId);
 		$qb->andWhere($qb->expr()->neq('c.deleted_at', $qb->createNamedParameter(0, IQueryBuilder::PARAM_INT)))
@@ -193,6 +205,7 @@ class CardMapper extends QBMapper implements IPermissionMapper {
 			->from('deck_cards', 'c')
 			->join('c', 'deck_stacks', 's', 's.id = c.stack_id')
 			->where($qb->expr()->eq('s.board_id', $qb->createNamedParameter($boardId)))
+			->andWhere($qb->expr()->eq('c.archived', $qb->createNamedParameter(false, IQueryBuilder::PARAM_BOOL)))
 			->andWhere($qb->expr()->eq('c.deleted_at', $qb->createNamedParameter('0')))
 			->orderBy('c.duedate')
 			->setMaxResults($limit)
@@ -223,6 +236,21 @@ class CardMapper extends QBMapper implements IPermissionMapper {
 			->setFirstResult($offset)
 			->orderBy('order')
 			->addOrderBy('id');
+		return $this->findEntities($qb);
+	}
+
+	public function findAllByBoardId(int $boardId, ?int $limit = null, ?int $offset = null): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->select('c.*')
+			->from('deck_cards', 'c')
+			->innerJoin('c', 'deck_stacks', 's', 's.id = c.stack_id')
+			->innerJoin('s', 'deck_boards', 'b', 'b.id = s.board_id')
+			->where($qb->expr()->eq('board_id', $qb->createNamedParameter($boardId, IQueryBuilder::PARAM_INT)))
+			->andWhere($qb->expr()->eq('archived', $qb->createNamedParameter(false, IQueryBuilder::PARAM_BOOL)))
+			->setMaxResults($limit)
+			->setFirstResult($offset)
+			->orderBy('c.lastmodified')
+			->addOrderBy('c.id');
 		return $this->findEntities($qb);
 	}
 
@@ -265,7 +293,7 @@ class CardMapper extends QBMapper implements IPermissionMapper {
 
 	public function findOverdue() {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('id','title','duedate','notified')
+		$qb->select('id', 'title', 'duedate', 'notified')
 			->from('deck_cards')
 			->where($qb->expr()->lt('duedate', $qb->createFunction('NOW()')))
 			->andWhere($qb->expr()->eq('notified', $qb->createNamedParameter(false, IQueryBuilder::PARAM_BOOL)))
@@ -276,7 +304,7 @@ class CardMapper extends QBMapper implements IPermissionMapper {
 
 	public function findUnexposedDescriptionChances() {
 		$qb = $this->db->getQueryBuilder();
-		$qb->select('id','title','duedate','notified','description_prev','last_editor','description')
+		$qb->select('id', 'title', 'duedate', 'notified', 'description_prev', 'last_editor', 'description')
 			->from('deck_cards')
 			->where($qb->expr()->isNotNull('last_editor'))
 			->andWhere($qb->expr()->isNotNull('description_prev'));
@@ -548,10 +576,10 @@ class CardMapper extends QBMapper implements IPermissionMapper {
 		$qb->execute();
 	}
 
-	public function isOwner($userId, $cardId): bool {
+	public function isOwner($userId, $id): bool {
 		$sql = 'SELECT owner FROM `*PREFIX*deck_boards` WHERE `id` IN (SELECT board_id FROM `*PREFIX*deck_stacks` WHERE id IN (SELECT stack_id FROM `*PREFIX*deck_cards` WHERE id = ?))';
 		$stmt = $this->db->prepare($sql);
-		$stmt->bindParam(1, $cardId, \PDO::PARAM_INT);
+		$stmt->bindParam(1, $id, \PDO::PARAM_INT, 0);
 		$stmt->execute();
 		$row = $stmt->fetch();
 		return ($row['owner'] === $userId);
@@ -585,5 +613,48 @@ class CardMapper extends QBMapper implements IPermissionMapper {
 			}
 			return null;
 		});
+	}
+
+	public function transferOwnership(string $ownerId, string $newOwnerId, int $boardId = null): void {
+		$params = [
+			'owner' => $ownerId,
+			'newOwner' => $newOwnerId
+		];
+		$sql = "UPDATE `*PREFIX*{$this->tableName}`  SET `owner` = :newOwner WHERE `owner` = :owner";
+		$stmt = $this->db->executeQuery($sql, $params);
+		$stmt->closeCursor();
+	}
+
+	public function remapCardOwner(int $boardId, string $userId, string $newUserId): void {
+		$subQuery = $this->db->getQueryBuilder();
+		$subQuery->selectAlias('c.id', 'id')
+			->from('deck_cards', 'c')
+			->innerJoin('c', 'deck_stacks', 's', 's.id = c.stack_id')
+			->where($subQuery->expr()->eq('c.owner', $subQuery->createNamedParameter($userId, IQueryBuilder::PARAM_STR)))
+			->andWhere($subQuery->expr()->eq('s.board_id', $subQuery->createNamedParameter($boardId, IQueryBuilder::PARAM_INT)))
+			->setMaxResults(1000);
+
+		$qb = $this->db->getQueryBuilder();
+		$qb->update('deck_cards')
+			->set('owner', $qb->createParameter('owner'))
+			->where($qb->expr()->in('id', $qb->createParameter('ids')));
+
+		$moreResults = true;
+		do {
+			$result = $subQuery->executeQuery();
+			$ids = array_map(function ($item) {
+				return $item['id'];
+			}, $result->fetchAll());
+
+			if (count($ids) === 0 || $result->rowCount() === 0) {
+				$moreResults = false;
+			}
+
+			$qb->setParameter('owner', $newUserId, IQueryBuilder::PARAM_STR);
+			$qb->setParameter('ids', $ids, IQueryBuilder::PARAM_INT_ARRAY);
+			$qb->executeStatement();
+		} while ($moreResults === true);
+
+		$result->closeCursor();
 	}
 }

@@ -30,7 +30,7 @@
 				<h2>{{ t('deck', 'Loading board') }}</h2>
 				<p />
 			</div>
-			<EmptyContent v-else-if="isEmpty" key="empty" icon="icon-deck">
+			<NcEmptyContent v-else-if="isEmpty" key="empty" icon="icon-deck">
 				{{ t('deck', 'No lists available') }}
 				<template v-if="canManage" #desc>
 					{{ t('deck', 'Create a new list to add cards to this board') }}
@@ -48,14 +48,17 @@
 							value="">
 					</form>
 				</template>
-			</EmptyContent>
+			</NcEmptyContent>
 			<div v-else-if="!isEmpty && !loading" key="board" class="board">
 				<Container lock-axix="y"
 					orientation="horizontal"
 					:drag-handle-selector="dragHandleSelector"
+					data-click-closes-sidebar="true"
+					@drag-start="draggingStack = true"
+					@drag-end="draggingStack = false"
 					@drop="onDropStack">
-					<Draggable v-for="stack in stacksByBoard" :key="stack.id">
-						<Stack :stack="stack" />
+					<Draggable v-for="stack in stacksByBoard" :key="stack.id" data-click-closes-sidebar="true">
+						<Stack :stack="stack" :dragging="draggingStack" data-click-closes-sidebar="true" />
 					</Draggable>
 				</Container>
 			</div>
@@ -73,10 +76,12 @@
 
 import { Container, Draggable } from 'vue-smooth-dnd'
 import { mapState, mapGetters } from 'vuex'
-import Controls from '../Controls'
-import Stack from './Stack'
-import { EmptyContent } from '@nextcloud/vue'
-import GlobalSearchResults from '../search/GlobalSearchResults'
+import Controls from '../Controls.vue'
+import Stack from './Stack.vue'
+import { NcEmptyContent } from '@nextcloud/vue'
+import GlobalSearchResults from '../search/GlobalSearchResults.vue'
+import { showError } from '../../helpers/errors.js'
+import { createSession } from '../../sessions.js'
 
 export default {
 	name: 'Board',
@@ -86,7 +91,7 @@ export default {
 		Container,
 		Draggable,
 		Stack,
-		EmptyContent,
+		NcEmptyContent,
 	},
 	inject: [
 		'boardApi',
@@ -99,6 +104,7 @@ export default {
 	},
 	data() {
 		return {
+			draggingStack: false,
 			loading: true,
 			newStackTitle: '',
 		}
@@ -116,20 +122,32 @@ export default {
 			return this.$store.getters.stacksByBoard(this.board.id)
 		},
 		dragHandleSelector() {
-			return this.canEdit ? null : '.no-drag'
+			return this.canEdit ? '.stack__title' : '.no-drag'
 		},
 		isEmpty() {
 			return this.stacksByBoard.length === 0
 		},
 	},
 	watch: {
-		id: 'fetchData',
+		id(newValue, oldValue) {
+			if (this.session) {
+				// close old session
+				this.session.close()
+			}
+			this.session = createSession(newValue)
+
+			this.fetchData()
+		},
 		showArchived() {
 			this.fetchData()
 		},
 	},
 	created() {
+		this.session = createSession(this.id)
 		this.fetchData()
+	},
+	beforeDestroy() {
+		this.session.close()
 	},
 	methods: {
 		async fetchData() {
@@ -139,6 +157,7 @@ export default {
 				await this.$store.dispatch('loadStacks', this.id)
 			} catch (e) {
 				console.error(e)
+				showError(e)
 			}
 			this.loading = false
 		},
@@ -161,8 +180,8 @@ export default {
 
 <style lang="scss" scoped>
 
-	@import '../../css/animations.scss';
-	@import '../../css/variables.scss';
+	@import '../../css/animations';
+	@import '../../css/variables';
 
 	form {
 		text-align: center;
@@ -204,7 +223,7 @@ export default {
 		align-items: stretch;
 		height: 100%;
 
-		.smooth-dnd-draggable-wrapper::v-deep {
+		&:deep(.smooth-dnd-draggable-wrapper) {
 			display: flex;
 			height: auto;
 
@@ -220,6 +239,7 @@ export default {
 					padding: $stack-spacing;
 					overflow-x: hidden;
 					overflow-y: auto;
+					scrollbar-gutter: stable;
 					padding-top: 15px;
 					margin-top: -10px;
 				}

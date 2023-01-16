@@ -1,7 +1,6 @@
 <template>
 	<div>
-		<Multiselect
-			v-if="canShare"
+		<NcMultiselect v-if="canShare"
 			v-model="addAcl"
 			:placeholder="t('deck', 'Share board with a user, group or circle …')"
 			:options="formatedSharees"
@@ -19,13 +18,12 @@
 			<template #noResult>
 				{{ isSearching ? t('deck', 'Searching for users, groups and circles …') : t('deck', 'No participants found') }}
 			</template>
-		</Multiselect>
+		</NcMultiselect>
 
-		<ul
-			id="shareWithList"
+		<ul id="shareWithList"
 			class="shareWithList">
 			<li>
-				<Avatar :user="board.owner.uid" />
+				<NcAvatar :user="board.owner.uid" />
 				<span class="has-tooltip username">
 					{{ board.owner.displayname }}
 					<span v-if="!isCurrentUser(board.owner.uid)" class="board-owner-label">
@@ -33,8 +31,8 @@
 					</span>
 				</span>
 			</li>
-			<li v-for="acl in board.acl" :key="acl.id">
-				<Avatar v-if="acl.type===0" :user="acl.participant.uid" />
+			<li v-for="acl in board.acl" :key="acl.id" :data-cy="'acl-participant:' + acl.participant.uid">
+				<NcAvatar v-if="acl.type===0" :user="acl.participant.uid" />
 				<div v-if="acl.type===1" class="avatardiv icon icon-group" />
 				<div v-if="acl.type===7" class="avatardiv icon icon-circles" />
 				<span class="has-tooltip username">
@@ -43,24 +41,46 @@
 					<span v-if="acl.type===7">{{ t('deck', '(Circle)') }}</span>
 				</span>
 
-				<ActionCheckbox v-if="!(isCurrentUser(acl.participant.uid) && acl.type === 0) && (canManage || (canEdit && canShare))" :checked="acl.permissionEdit" @change="clickEditAcl(acl)">
+				<NcActionCheckbox v-if="!(isCurrentUser(acl.participant.uid) && acl.type === 0) && (canManage || (canEdit && canShare))"
+					:checked="acl.permissionEdit"
+					data-cy="action:permission-edit"
+					@change="clickEditAcl(acl)">
 					{{ t('deck', 'Can edit') }}
-				</ActionCheckbox>
-				<Actions v-if="!(isCurrentUser(acl.participant.uid) && acl.type === 0)" :force-menu="true">
-					<ActionCheckbox v-if="canManage || canShare" :checked="acl.permissionShare" @change="clickShareAcl(acl)">
+				</NcActionCheckbox>
+				<NcActions v-if="!(isCurrentUser(acl.participant.uid) && acl.type === 0)" :force-menu="true">
+					<NcActionCheckbox v-if="canManage || canShare"
+						:checked="acl.permissionShare"
+						data-cy="action:permission-share"
+						@change="clickShareAcl(acl)">
 						{{ t('deck', 'Can share') }}
-					</ActionCheckbox>
-					<ActionCheckbox v-if="canManage" :checked="acl.permissionManage" @change="clickManageAcl(acl)">
+					</NcActionCheckbox>
+					<NcActionCheckbox v-if="canManage"
+						:checked="acl.permissionManage"
+						data-cy="action:permission-manage"
+						@change="clickManageAcl(acl)">
 						{{ t('deck', 'Can manage') }}
-					</ActionCheckbox>
-					<ActionButton v-if="canManage" icon="icon-delete" @click="clickDeleteAcl(acl)">
+					</NcActionCheckbox>
+					<NcActionCheckbox v-if="acl.type === 0 && isCurrentUser(board.owner.uid)"
+						:checked="acl.owner"
+						data-cy="action:permission-owner"
+						@change="clickTransferOwner(acl.participant.uid)">
+						{{ t('deck', 'Owner') }}
+					</NcActionCheckbox>
+					<NcActionButton v-if="canManage"
+						icon="icon-delete"
+						data-cy="action:acl-delete"
+						@click="clickDeleteAcl(acl)">
 						{{ t('deck', 'Delete') }}
-					</ActionButton>
-				</Actions>
+					</NcActionButton>
+				</NcActions>
 			</li>
 		</ul>
 
-		<CollectionList v-if="board.id"
+		<NcRelatedResourcesPanel v-if="board.id"
+			provider-id="deck"
+			:item-id="board.id" />
+
+		<CollectionList v-if="projectsEnabled && board.id"
 			:id="`${board.id}`"
 			:name="board.title"
 			type="deck" />
@@ -68,22 +88,24 @@
 </template>
 
 <script>
-import { Avatar, Multiselect, Actions, ActionButton, ActionCheckbox } from '@nextcloud/vue'
+import { NcAvatar, NcMultiselect, NcActions, NcActionButton, NcActionCheckbox, NcRelatedResourcesPanel } from '@nextcloud/vue'
 import { CollectionList } from 'nextcloud-vue-collections'
 import { mapGetters, mapState } from 'vuex'
 import { getCurrentUser } from '@nextcloud/auth'
-import { showError } from '@nextcloud/dialogs'
-import debounce from 'lodash/debounce'
+import { showError, showSuccess } from '@nextcloud/dialogs'
+import { loadState } from '@nextcloud/initial-state'
+import debounce from 'lodash/debounce.js'
 
 export default {
 	name: 'SharingTabSidebar',
 	components: {
-		Avatar,
-		Actions,
-		ActionButton,
-		ActionCheckbox,
-		Multiselect,
+		NcAvatar,
+		NcActions,
+		NcActionButton,
+		NcActionCheckbox,
+		NcMultiselect,
 		CollectionList,
+		NcRelatedResourcesPanel,
 	},
 	props: {
 		board: {
@@ -97,6 +119,8 @@ export default {
 			isSearching: false,
 			addAcl: null,
 			addAclForAPI: null,
+			newOwner: null,
+			projectsEnabled: loadState('core', 'projects_enabled', false),
 		}
 	},
 	computed: {
@@ -193,6 +217,38 @@ export default {
 		},
 		clickDeleteAcl(acl) {
 			this.$store.dispatch('deleteAclFromCurrentBoard', acl)
+		},
+		clickTransferOwner(newOwner) {
+			OC.dialogs.confirmDestructive(
+				t('deck', 'Are you sure you want to transfer the board {title} to {user}?', { title: this.board.title, user: newOwner }),
+				t('deck', 'Transfer the board.'),
+				{
+					type: OC.dialogs.YES_NO_BUTTONS,
+					confirm: t('deck', 'Transfer'),
+					confirmClasses: 'error',
+					cancel: t('deck', 'Cancel'),
+				},
+				async (result) => {
+					if (result) {
+						try {
+							this.isLoading = true
+							await this.$store.dispatch('transferOwnership', {
+								boardId: this.board.id,
+								newOwner,
+							})
+							const successMessage = t('deck', 'The board has been transferred to {user}', { user: newOwner })
+							showSuccess(successMessage)
+							this.$router.push({ name: 'main' })
+						} catch (e) {
+							const errorMessage = t('deck', 'Failed to transfer the board to {user}', { user: newOwner.user })
+							showError(errorMessage)
+						} finally {
+							this.isLoading = false
+						}
+					}
+				},
+				true
+			)
 		},
 	},
 }

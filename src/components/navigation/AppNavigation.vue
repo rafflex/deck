@@ -21,36 +21,46 @@
   -->
 
 <template>
-	<AppNavigationVue :class="{'icon-loading': loading}">
+	<NcAppNavigation :class="{'icon-loading': loading}">
 		<template #list>
-			<AppNavigationItem
-				:title="t('deck', 'Upcoming cards')"
-				icon="icon-calendar-dark"
+			<NcAppNavigationItem :title="t('deck', 'Upcoming cards')"
 				:exact="true"
-				to="/" />
-			<AppNavigationBoardCategory
-				id="deck-navigation-all"
+				to="/">
+				<template #icon>
+					<CalendarIcon :size="20" />
+				</template>
+			</NcAppNavigationItem>
+			<AppNavigationBoardCategory id="deck-navigation-all"
 				to="/board"
 				:text="t('deck', 'All boards')"
 				:boards="noneArchivedBoards"
 				:open-on-add-boards="true"
-				icon="icon-deck" />
-			<AppNavigationBoardCategory
-				id="deck-navigation-archived"
+				icon="icon-deck">
+				<template #icon>
+					<DeckIcon :size="16" />
+				</template>
+			</AppNavigationBoardCategory>
+			<AppNavigationBoardCategory id="deck-navigation-archived"
 				to="/board/archived"
 				:text="t('deck', 'Archived boards')"
-				:boards="archivedBoards"
-				icon="icon-archive" />
-			<AppNavigationBoardCategory
-				id="deck-navigation-shared"
+				:boards="archivedBoards">
+				<template #icon>
+					<ArchiveIcon :size="20" decorative />
+				</template>
+			</AppNavigationBoardCategory>
+			<AppNavigationBoardCategory id="deck-navigation-shared"
 				to="/board/shared"
 				:text="t('deck', 'Shared with you')"
 				:boards="sharedBoards"
-				icon="icon-shared" />
+				icon="icon-shared">
+				<template #icon>
+					<ShareVariantIcon :size="20" decorative />
+				</template>
+			</AppNavigationBoardCategory>
 			<AppNavigationAddBoard v-if="canCreate" />
 		</template>
 		<template #footer>
-			<AppNavigationSettings>
+			<NcAppNavigationSettings :title="t('deck', 'Deck settings')">
 				<div>
 					<div>
 						<input id="toggle-modal"
@@ -59,6 +69,16 @@
 							class="checkbox">
 						<label for="toggle-modal">
 							{{ t('deck', 'Use bigger card view') }}
+						</label>
+					</div>
+
+					<div>
+						<input id="toggle-idbadge"
+							v-model="cardIdBadge"
+							type="checkbox"
+							class="checkbox">
+						<label for="toggle-idbadge">
+							{{ t('deck', 'Show card ID badge') }}
 						</label>
 					</div>
 
@@ -72,7 +92,7 @@
 						</label>
 					</div>
 
-					<Multiselect v-if="isAdmin"
+					<NcMultiselect v-if="isAdmin"
 						v-model="groupLimit"
 						:class="{'icon-loading-small': groupLimitDisabled}"
 						open-direction="bottom"
@@ -87,33 +107,41 @@
 						{{ t('deck', 'Limiting Deck will block users not part of those groups from creating their own boards. Users will still be able to work on boards that have been shared with them.') }}
 					</p>
 				</div>
-			</AppNavigationSettings>
+			</NcAppNavigationSettings>
 		</template>
-	</AppNavigationVue>
+	</NcAppNavigation>
 </template>
 
 <script>
 import axios from '@nextcloud/axios'
 import { mapGetters } from 'vuex'
 import ClickOutside from 'vue-click-outside'
-import { AppNavigation as AppNavigationVue, AppNavigationItem, AppNavigationSettings, Multiselect } from '@nextcloud/vue'
-import AppNavigationAddBoard from './AppNavigationAddBoard'
-import AppNavigationBoardCategory from './AppNavigationBoardCategory'
+import { NcAppNavigation, NcAppNavigationItem, NcAppNavigationSettings, NcMultiselect } from '@nextcloud/vue'
+import AppNavigationAddBoard from './AppNavigationAddBoard.vue'
+import AppNavigationBoardCategory from './AppNavigationBoardCategory.vue'
 import { loadState } from '@nextcloud/initial-state'
 import { generateOcsUrl } from '@nextcloud/router'
 import { getCurrentUser } from '@nextcloud/auth'
+import ArchiveIcon from 'vue-material-design-icons/Archive.vue'
+import CalendarIcon from 'vue-material-design-icons/Calendar.vue'
+import DeckIcon from './../icons/DeckIcon.vue'
+import ShareVariantIcon from 'vue-material-design-icons/Share.vue'
 
 const canCreateState = loadState('deck', 'canCreate')
 
 export default {
 	name: 'AppNavigation',
 	components: {
-		AppNavigationVue,
-		AppNavigationSettings,
+		NcAppNavigation,
+		NcAppNavigationSettings,
 		AppNavigationAddBoard,
 		AppNavigationBoardCategory,
-		Multiselect,
-		AppNavigationItem,
+		NcMultiselect,
+		NcAppNavigationItem,
+		ArchiveIcon,
+		CalendarIcon,
+		DeckIcon,
+		ShareVariantIcon,
 	},
 	directives: {
 		ClickOutside,
@@ -144,10 +172,18 @@ export default {
 		},
 		cardDetailsInModal: {
 			get() {
-				return this.$store.getters.cardDetailsInModal
+				return this.$store.getters.config('cardDetailsInModal')
 			},
 			set(newValue) {
-				this.$store.dispatch('setCardDetailsInModal', newValue)
+				this.$store.dispatch('setConfig', { cardDetailsInModal: newValue })
+			},
+		},
+		cardIdBadge: {
+			get() {
+				return this.$store.getters.config('cardIdBadge')
+			},
+			set(newValue) {
+				this.$store.dispatch('setConfig', { cardIdBadge: newValue })
 			},
 		},
 		configCalendar: {

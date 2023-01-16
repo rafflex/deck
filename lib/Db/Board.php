@@ -23,6 +23,14 @@
 
 namespace OCA\Deck\Db;
 
+/**
+ * @method int getId()
+ * @method string getTitle()
+ * @method int getShared()
+ * @method bool getArchived()
+ * @method int getDeletedAt()
+ * @method int getLastModified()
+ */
 class Board extends RelationalEntity {
 	protected $title;
 	protected $owner;
@@ -36,6 +44,7 @@ class Board extends RelationalEntity {
 	protected $users = [];
 	protected $shared;
 	protected $stacks = [];
+	protected $activeSessions = [];
 	protected $deletedAt = 0;
 	protected $lastModified = 0;
 
@@ -51,6 +60,7 @@ class Board extends RelationalEntity {
 		$this->addRelation('acl');
 		$this->addRelation('shared');
 		$this->addRelation('users');
+		$this->addRelation('activeSessions');
 		$this->addRelation('permissions');
 		$this->addRelation('stacks');
 		$this->addRelation('settings');
@@ -58,7 +68,7 @@ class Board extends RelationalEntity {
 		$this->shared = -1;
 	}
 
-	public function jsonSerialize() {
+	public function jsonSerialize(): array {
 		$json = parent::jsonSerialize();
 		if ($this->shared === -1) {
 			unset($json['shared']);
@@ -74,18 +84,14 @@ class Board extends RelationalEntity {
 	 * @param Label[] $labels
 	 */
 	public function setLabels($labels) {
-		foreach ($labels as $l) {
-			$this->labels[] = $l;
-		}
+		$this->labels = $labels;
 	}
 
 	/**
 	 * @param Acl[] $acl
 	 */
 	public function setAcl($acl) {
-		foreach ($acl as $a) {
-			$this->acl[] = $a;
-		}
+		$this->acl = $acl;
 	}
 
 	public function getETag() {

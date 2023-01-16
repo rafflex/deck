@@ -16,6 +16,7 @@ class BoardContext implements Context {
 	private $stack = null;
 	/** @var array last card response */
 	private $card = null;
+	private array $storedCards = [];
 
 	/** @var ServerContext */
 	private $serverContext;
@@ -29,6 +30,19 @@ class BoardContext implements Context {
 
 	public function getLastUsedCard() {
 		return $this->card;
+	}
+
+	public function getLastUsedBoard() {
+		return $this->board;
+	}
+
+	/**
+	 * @Given /^creates a board with example content$/
+	 */
+	public function createExampleContent() {
+		$this->createsABoardNamedWithColor('Example board', 'ff0000');
+		$this->createAStackNamed('ToDo');
+		$this->createACardNamed('My example card');
 	}
 
 	/**
@@ -47,7 +61,21 @@ class BoardContext implements Context {
 	 * @When /^fetches the board named "([^"]*)"$/
 	 */
 	public function fetchesTheBoardNamed($boardName) {
-		$this->requestContext->sendJSONrequest('GET', '/index.php/apps/deck/boards/' . $this->board['id'], []);
+		$id = null;
+		if (!$this->board || $boardName != $this->board['title']) {
+			$this->requestContext->sendJSONrequest('GET', '/index.php/apps/deck/boards', []);
+			$boards = json_decode((string)$this->getResponse()->getBody(), true);
+			foreach (array_reverse($boards) as $board) {
+				if ($board['title'] == $boardName) {
+					$id = $board['id'];
+					break;
+				}
+			}
+			Assert::assertNotNull($id, "Could not find board named ".$boardName);
+		} else {
+			$id = $this->board['id'];
+		}
+		$this->requestContext->sendJSONrequest('GET', '/index.php/apps/deck/boards/' . $id, []);
 		$this->getResponse()->getBody()->seek(0);
 		$this->board = json_decode((string)$this->getResponse()->getBody(), true);
 	}
@@ -231,5 +259,16 @@ class BoardContext implements Context {
 		$label = array_shift($filteredLabels);
 		$this->requestContext->sendJSONrequest('POST', '/index.php/apps/deck/cards/' . $this->card['id'] .'/label/' . $label['id']);
 		$this->requestContext->getResponse()->getBody()->seek(0);
+	}
+
+	/**
+	 * @When remember the last card as :arg1
+	 */
+	public function rememberTheLastCardAs($arg1) {
+		$this->storedCards[$arg1] = $this->getLastUsedCard();
+	}
+
+	public function getRememberedCard($arg1) {
+		return $this->storedCards[$arg1] ?? null;
 	}
 }

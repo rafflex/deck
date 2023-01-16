@@ -25,6 +25,7 @@
 return [
 	'routes' => [
 		['name' => 'page#index', 'url' => '/', 'verb' => 'GET'],
+		['name' => 'page#redirectToCard', 'url' => '/card/{cardId}', 'verb' => 'GET'],
 
 		// boards
 		['name' => 'board#index', 'url' => '/boards', 'verb' => 'GET'],
@@ -38,6 +39,8 @@ return [
 		['name' => 'board#updateAcl', 'url' => '/boards/{boardId}/acl/{aclId}', 'verb' => 'PUT'],
 		['name' => 'board#deleteAcl', 'url' => '/boards/{boardId}/acl/{aclId}', 'verb' => 'DELETE'],
 		['name' => 'board#clone', 'url' => '/boards/{boardId}/clone', 'verb' => 'POST'],
+		['name' => 'board#transferOwner', 'url' => '/boards/{boardId}/transferOwner', 'verb' => 'PUT'],
+		['name' => 'board#export', 'url' => '/boards/{boardId}/export', 'verb' => 'GET'],
 
 		// stacks
 		['name' => 'stack#index', 'url' => '/stacks/{boardId}', 'verb' => 'GET'],
@@ -89,6 +92,10 @@ return [
 		['name' => 'board_api#addAcl', 'url' => '/api/v{apiVersion}/boards/{boardId}/acl', 'verb' => 'POST'],
 		['name' => 'board_api#deleteAcl', 'url' => '/api/v{apiVersion}/boards/{boardId}/acl/{aclId}', 'verb' => 'DELETE'],
 		['name' => 'board_api#updateAcl', 'url' => '/api/v{apiVersion}/boards/{boardId}/acl/{aclId}', 'verb' => 'PUT'],
+
+		['name' => 'board_import_api#getAllowedSystems', 'url' => '/api/v{apiVersion}/boards/import/getSystems','verb' => 'GET'],
+		['name' => 'board_import_api#getConfigSchema', 'url' => '/api/v{apiVersion}/boards/import/config/schema/{name}','verb' => 'GET'],
+		['name' => 'board_import_api#import', 'url' => '/api/v{apiVersion}/boards/import','verb' => 'POST'],
 
 
 		['name' => 'stack_api#index', 'url' => '/api/v{apiVersion}/boards/{boardId}/stacks', 'verb' => 'GET'],
@@ -143,5 +150,10 @@ return [
 		['name' => 'overview_api#upcomingCards', 'url' => '/api/v{apiVersion}/overview/upcoming', 'verb' => 'GET'],
 
 		['name' => 'search#search', 'url' => '/api/v{apiVersion}/search', 'verb' => 'GET'],
+
+		// sessions
+		['name' => 'Session#create', 'url' => '/api/v{apiVersion}/session/create', 'verb' => 'PUT'],
+		['name' => 'Session#sync', 'url' => '/api/v{apiVersion}/session/sync', 'verb' => 'POST'],
+		['name' => 'Session#close', 'url' => '/api/v{apiVersion}/session/close', 'verb' => 'POST'],
 	]
 ];

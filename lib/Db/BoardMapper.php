@@ -24,6 +24,7 @@
 namespace OCA\Deck\Db;
 
 use OC\Cache\CappedMemoryCache;
+use OCA\Deck\Service\CirclesService;
 use OCP\AppFramework\Db\DoesNotExistException;
 use OCP\AppFramework\Db\QBMapper;
 use OCP\DB\QueryBuilder\IQueryBuilder;
@@ -32,19 +33,19 @@ use OCP\IUserManager;
 use OCP\IGroupManager;
 use Psr\Log\LoggerInterface;
 
+/** @template-extends QBMapper<Board> */
 class BoardMapper extends QBMapper implements IPermissionMapper {
 	private $labelMapper;
 	private $aclMapper;
 	private $stackMapper;
 	private $userManager;
 	private $groupManager;
+	private $circlesService;
 	private $logger;
 
-	private $circlesEnabled;
-
-	/** @var CappedMemoryCache */
+	/** @var CappedMemoryCache<Board[]> */
 	private $userBoardCache;
-	/** @var CappedMemoryCache */
+	/** @var CappedMemoryCache<Board> */
 	private $boardCache;
 
 	public function __construct(
@@ -54,6 +55,7 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 		StackMapper $stackMapper,
 		IUserManager $userManager,
 		IGroupManager $groupManager,
+		CirclesService $circlesService,
 		LoggerInterface $logger
 	) {
 		parent::__construct($db, 'deck_boards', Board::class);
@@ -62,12 +64,11 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 		$this->stackMapper = $stackMapper;
 		$this->userManager = $userManager;
 		$this->groupManager = $groupManager;
+		$this->circlesService = $circlesService;
 		$this->logger = $logger;
 
 		$this->userBoardCache = new CappedMemoryCache();
 		$this->boardCache = new CappedMemoryCache();
-
-		$this->circlesEnabled = \OC::$server->getAppManager()->isEnabledForUser('circles');
 	}
 
 
@@ -107,6 +108,47 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 		return $this->boardCache[$id];
 	}
 
+	public function findBoardIds(string $userId): array {
+		$qb = $this->db->getQueryBuilder();
+		$qb->selectDistinct('b.id')
+			->from($this->getTableName(), 'b')
+			->leftJoin('b', 'deck_board_acl', 'acl', $qb->expr()->eq('b.id', 'acl.board_id'));
+
+		// Owned by the user
+		$qb->where($qb->expr()->andX(
+			$qb->expr()->eq('owner', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)),
+		));
+
+		// Shared to the user
+		$qb->orWhere($qb->expr()->andX(
+			$qb->expr()->eq('acl.participant', $qb->createNamedParameter($userId, IQueryBuilder::PARAM_STR)),
+			$qb->expr()->eq('acl.type', $qb->createNamedParameter(Acl::PERMISSION_TYPE_USER, IQueryBuilder::PARAM_INT)),
+		));
+
+		// Shared to user groups of the user
+		$groupIds = $this->groupManager->getUserGroupIds($this->userManager->get($userId));
+		if (count($groupIds) !== 0) {
+			$qb->orWhere($qb->expr()->andX(
+					$qb->expr()->in('acl.participant', $qb->createNamedParameter($groupIds, IQueryBuilder::PARAM_STR_ARRAY)),
+					$qb->expr()->eq('acl.type', $qb->createNamedParameter(Acl::PERMISSION_TYPE_GROUP, IQueryBuilder::PARAM_INT)),
+				));
+		}
+
+		// Shared to circles of the user
+		$circles = $this->circlesService->getUserCircles($userId);
+		if (count($circles) !== 0) {
+			$qb->orWhere($qb->expr()->andX(
+				$qb->expr()->in('acl.participant', $qb->createNamedParameter($circles, IQueryBuilder::PARAM_STR_ARRAY)),
+				$qb->expr()->eq('acl.type', $qb->createNamedParameter(Acl::PERMISSION_TYPE_CIRCLE, IQueryBuilder::PARAM_INT)),
+			));
+		}
+
+		$result = $qb->executeQuery();
+		return array_map(function (string $id) {
+			return (int)$id;
+		}, $result->fetchAll(\PDO::FETCH_COLUMN));
+	}
+
 	public function findAllForUser(string $userId, ?int $since = null, bool $includeArchived = true, ?int $before = null,
 								   ?string $term = null): array {
 		$useCache = ($since === -1 && $includeArchived === true && $before === null && $term === null);
@@ -131,14 +173,9 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 
 	/**
 	 * Find all boards for a given user
-	 *
-	 * @param $userId
-	 * @param null $limit
-	 * @param null $offset
-	 * @return array
 	 */
 	public function findAllByUser(string $userId, ?int $limit = null, ?int $offset = null, ?int $since = null,
-								  bool $includeArchived = true, ?int $before = null, ?string $term = null) {
+								  bool $includeArchived = true, ?int $before = null, ?string $term = null): array {
 		// FIXME this used to be a UNION to get boards owned by $userId and the user shares in one single query
 		// Is it possible with the query builder?
 		$qb = $this->db->getQueryBuilder();
@@ -247,15 +284,9 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 
 	/**
 	 * Find all boards for a given user
-	 *
-	 * @param $userId
-	 * @param $groups
-	 * @param null $limit
-	 * @param null $offset
-	 * @return array
 	 */
 	public function findAllByGroups(string $userId, array $groups, ?int $limit = null, ?int $offset = null, ?int $since = null,
-									bool $includeArchived = true, ?int $before = null, ?string $term = null) {
+									bool $includeArchived = true, ?int $before = null, ?string $term = null): array {
 		if (count($groups) <= 0) {
 			return [];
 		}
@@ -315,12 +346,7 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 
 	public function findAllByCircles(string $userId, ?int $limit = null, ?int $offset = null, ?int $since = null,
 									 bool $includeArchived = true, ?int $before = null, ?string $term = null) {
-		if (!$this->circlesEnabled) {
-			return [];
-		}
-		$circles = array_map(function ($circle) {
-			return $circle->getUniqueId();
-		}, \OCA\Circles\Api\v1\Circles::joinedCircles($userId, true));
+		$circles = $this->circlesService->getUserCircles($userId);
 		if (count($circles) === 0) {
 			return [];
 		}
@@ -419,8 +445,8 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 		return parent::delete($entity);
 	}
 
-	public function isOwner($userId, $boardId): bool {
-		$board = $this->find($boardId);
+	public function isOwner($userId, $id): bool {
+		$board = $this->find($id);
 		return ($board->getOwner() === $userId);
 	}
 
@@ -449,11 +475,11 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 				return null;
 			}
 			if ($acl->getType() === Acl::PERMISSION_TYPE_CIRCLE) {
-				if (!$this->circlesEnabled) {
+				if (!$this->circlesService->isCirclesEnabled()) {
 					return null;
 				}
 				try {
-					$circle = \OCA\Circles\Api\v1\Circles::detailsCircle($acl->getParticipant(), true);
+					$circle = $this->circlesService->getCircle($acl->getParticipant());
 					if ($circle) {
 						return new Circle($circle);
 					}
@@ -479,5 +505,35 @@ class BoardMapper extends QBMapper implements IPermissionMapper {
 			}
 			return null;
 		});
+	}
+
+	/**
+	 * @throws \OCP\DB\Exception
+	 */
+	public function transferOwnership(string $ownerId, string $newOwnerId, $boardId = null): void {
+		$qb = $this->db->getQueryBuilder();
+		$qb->update('deck_boards')
+			->set('owner', $qb->createNamedParameter($newOwnerId, IQueryBuilder::PARAM_STR))
+			->where($qb->expr()->eq('owner', $qb->createNamedParameter($ownerId, IQueryBuilder::PARAM_STR)));
+		if ($boardId !== null) {
+			$qb->andWhere($qb->expr()->eq('id', $qb->createNamedParameter($boardId, IQueryBuilder::PARAM_INT)));
+		}
+		$qb->executeStatement();
+	}
+
+	/**
+	 * Reset cache for a given board or a given user
+	 */
+	public function flushCache(?int $boardId = null, ?string $userId = null) {
+		if ($boardId) {
+			unset($this->boardCache[$boardId]);
+		} else {
+			$this->boardCache = null;
+		}
+		if ($userId) {
+			unset($this->userBoardCache[$userId]);
+		} else {
+			$this->userBoardCache = null;
+		}
 	}
 }

@@ -22,53 +22,85 @@
   -->
 
 <template>
-	<div class="stack">
-		<div v-click-outside="stopCardCreation" class="stack__header" :class="{'stack__header--add': showAddCard }">
+	<div class="stack" :data-cy-stack="stack.title">
+		<div v-click-outside="stopCardCreation"
+			class="stack__header"
+			:class="{'stack__header--add': showAddCard}"
+			tabindex="0"
+			:aria-label="stack.title">
 			<transition name="fade" mode="out-in">
 				<h3 v-if="!canManage || isArchived">
 					{{ stack.title }}
 				</h3>
 				<h3 v-else-if="!editing"
 					v-tooltip="stack.title"
+					tabindex="0"
+					:aria-label="stack.title"
 					class="stack__title"
-					@click="startEditing(stack)">
+					@click="startEditing(stack)"
+					@keydown.enter="startEditing(stack)">
 					{{ stack.title }}
 				</h3>
-				<form v-else @submit.prevent="finishedEdit(stack)">
-					<input v-model="copiedStack.title" v-focus type="text">
-					<input v-tooltip="t('deck', 'Add a new list')"
+				<form v-else-if="editing"
+					v-click-outside="cancelEdit"
+					data-cy="editStackTitleForm"
+					@submit.prevent="finishedEdit(stack)"
+					@keyup.esc="cancelEdit">
+					<input v-model="copiedStack.title"
+						v-focus
+						type="text"
+						required="required">
+					<input v-tooltip="t('deck', 'Edit list title')"
 						class="icon-confirm"
 						type="submit"
 						value="">
 				</form>
 			</transition>
-			<Actions v-if="canManage && !isArchived" :force-menu="true">
-				<ActionButton icon="icon-archive" @click="modalArchivAllCardsShow=true">
+			<NcActions v-if="canManage && !isArchived" :force-menu="true">
+				<NcActionButton v-if="!showArchived" icon="icon-archive" @click="modalArchivAllCardsShow=true">
+					<template #icon>
+						<ArchiveIcon decorative />
+					</template>
 					{{ t('deck', 'Archive all cards') }}
-				</ActionButton>
-				<ActionButton icon="icon-delete" @click="deleteStack(stack)">
+				</NcActionButton>
+				<NcActionButton v-if="showArchived" @click="modalArchivAllCardsShow=true">
+					<template #icon>
+						<ArchiveIcon decorative />
+					</template>
+					{{ t('deck', 'Unarchive all cards') }}
+				</NcActionButton>
+				<NcActionButton icon="icon-delete" @click="deleteStack(stack)">
 					{{ t('deck', 'Delete list') }}
-				</ActionButton>
-			</Actions>
-			<Actions v-if="canEdit && !showArchived && !isArchived">
-				<ActionButton icon="icon-add" @click.stop="showAddCard=true">
+				</NcActionButton>
+			</NcActions>
+			<NcActions v-if="canEdit && !showArchived && !isArchived">
+				<NcActionButton icon="icon-add" data-cy="action:add-card" @click.stop="showAddCard=true">
 					{{ t('deck', 'Add card') }}
-				</ActionButton>
-			</Actions>
+				</NcActionButton>
+			</NcActions>
 		</div>
 
-		<Modal v-if="modalArchivAllCardsShow" @close="modalArchivAllCardsShow=false">
+		<NcModal v-if="modalArchivAllCardsShow" @close="modalArchivAllCardsShow=false">
 			<div class="modal__content">
-				<h3>{{ t('deck', 'Archive all cards in this list') }}</h3>
+				<h3 v-if="!showArchived">
+					{{ t('deck', 'Archive all cards in this list') }}
+				</h3>
+				<h3 v-else>
+					{{ t('deck', 'Unarchive all cards in this list') }}
+				</h3>
+
 				<progress :value="stackTransfer.current" :max="stackTransfer.total" />
-				<button class="primary" @click="archiveAllCardsFromStack(stack)">
+				<button v-if="!showArchived" class="primary" @click="setArchivedToAllCardsFromStack(stack, !showArchived)">
 					{{ t('deck', 'Archive all cards') }}
+				</button>
+				<button v-else class="primary" @click="setArchivedToAllCardsFromStack(stack, !showArchived)">
+					{{ t('deck', 'Unarchive all cards') }}
 				</button>
 				<button @click="modalArchivAllCardsShow=false">
 					{{ t('deck', 'Cancel') }}
 				</button>
 			</div>
-		</Modal>
+		</NcModal>
 
 		<transition name="slide-top" appear>
 			<div v-if="showAddCard" class="stack__card-add">
@@ -96,15 +128,18 @@
 
 		<Container :get-child-payload="payloadForCard(stack.id)"
 			group-name="stack"
+			data-click-closes-sidebar="true"
 			non-drag-area-selector=".dragDisabled"
 			:drag-handle-selector="dragHandleSelector"
 			@should-accept-drop="canEdit"
+			@drag-start="draggingCard = true"
+			@drag-end="draggingCard = false"
 			@drop="($event) => onDropCard(stack.id, $event)">
 			<Draggable v-for="card in cardsByStack" :key="card.id">
 				<transition :appear="animate && !card.animated && (card.animated=true)"
 					:appear-class="'zoom-appear-class'"
 					:appear-active-class="'zoom-appear-active-class'">
-					<CardItem :id="card.id" />
+					<CardItem :id="card.id" :dragging="draggingCard" />
 				</transition>
 			</Draggable>
 		</Container>
@@ -112,28 +147,36 @@
 </template>
 
 <script>
-
+import ClickOutside from 'vue-click-outside'
 import { mapGetters, mapState } from 'vuex'
 import { Container, Draggable } from 'vue-smooth-dnd'
 
-import { Actions, ActionButton, Modal } from '@nextcloud/vue'
+import { NcActions, NcActionButton, NcModal } from '@nextcloud/vue'
 import { showError, showUndo } from '@nextcloud/dialogs'
-import CardItem from '../cards/CardItem'
+import CardItem from '../cards/CardItem.vue'
 
 import '@nextcloud/dialogs/styles/toast.scss'
+import ArchiveIcon from 'vue-material-design-icons/Archive.vue'
 
 export default {
 	name: 'Stack',
 	components: {
-		Actions,
-		ActionButton,
+		NcActions,
+		NcActionButton,
 		CardItem,
 		Container,
 		Draggable,
-		Modal,
+		NcModal,
+		ArchiveIcon,
 	},
-
+	directives: {
+		ClickOutside,
+	},
 	props: {
+		dragging: {
+			type: Boolean,
+			default: false,
+		},
 		stack: {
 			type: Object,
 			default: undefined,
@@ -142,6 +185,7 @@ export default {
 	data() {
 		return {
 			editing: false,
+			draggingCard: false,
 			copiedStack: '',
 			newCardTitle: '',
 			showAddCard: false,
@@ -162,7 +206,6 @@ export default {
 		]),
 		...mapState({
 			showArchived: state => state.showArchived,
-			cardDetailsInModal: state => state.cardDetailsInModal,
 		}),
 		cardsByStack() {
 			return this.$store.getters.cardsByStack(this.stack.id).filter((card) => {
@@ -174,6 +217,14 @@ export default {
 		},
 		dragHandleSelector() {
 			return this.canEdit ? null : '.no-drag'
+		},
+		cardDetailsInModal: {
+			get() {
+				return this.$store.getters.config('cardDetailsInModal')
+			},
+			set(newValue) {
+				this.$store.dispatch('setConfig', { cardDetailsInModal: newValue })
+			},
 		},
 	},
 
@@ -215,16 +266,20 @@ export default {
 			this.$store.dispatch('deleteStack', stack)
 			showUndo(t('deck', 'List deleted'), () => this.$store.dispatch('stackUndoDelete', stack))
 		},
-		archiveAllCardsFromStack(stack) {
+		setArchivedToAllCardsFromStack(stack, isArchived) {
 
 			this.stackTransfer.total = this.cardsByStack.length
 			this.cardsByStack.forEach((card, index) => {
 				this.stackTransfer.current = index
-				this.$store.dispatch('archiveUnarchiveCard', { ...card, archived: true })
+				this.$store.dispatch('archiveUnarchiveCard', { ...card, archived: isArchived })
 			})
 			this.modalArchivAllCardsShow = false
 		},
 		startEditing(stack) {
+			if (this.dragging) {
+			  return
+			}
+
 			this.copiedStack = Object.assign({}, stack)
 			this.editing = true
 		},
@@ -232,6 +287,9 @@ export default {
 			if (this.copiedStack.title !== stack.title) {
 				this.$store.dispatch('updateStack', this.copiedStack)
 			}
+			this.editing = false
+		},
+		cancelEdit() {
 			this.editing = false
 		},
 		async clickAddCard() {
@@ -269,7 +327,7 @@ export default {
 	@import './../../css/variables';
 
 	.stack {
-		width: $stack-width + $stack-spacing*3;
+		width: $stack-width + $stack-spacing * 3;
 		margin-left: math.div($stack-spacing, 2);
 		margin-right: math.div($stack-spacing, 2);
 	}
@@ -318,36 +376,47 @@ export default {
 			flex-grow: 1;
 			display: flex;
 			cursor: inherit;
+			margin: 0;
 
 			input[type=text] {
 				flex-grow: 1;
 			}
 		}
-	}
 
-	.stack__title {
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		max-width: calc($stack-width - 60px);
+		h3.stack__title {
+			white-space: nowrap;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			max-width: calc($stack-width - 60px);
+			border-radius: 3px;
+			margin: 6px;
+			padding: 4px 4px;
+
+			&:focus-visible {
+				outline: 2px solid var(--color-border-dark);
+				border-radius: 3px;
+			}
+		}
+
+		form {
+			margin: 2px 0;
+		}
 	}
 
 	.stack__card-add {
-		width: $stack-width;
 		height: 44px;
 		flex-shrink: 0;
 		z-index: 100;
 		display: flex;
-		margin-left: 12px;
-		margin-right: 12px;
 		margin-top: 5px;
 		margin-bottom: 20px;
 		background-color: var(--color-main-background);
 
 		form {
 			display: flex;
+			margin-left: 12px;
+			margin-right: 12px;
 			width: 100%;
-			margin: 0;
 			box-shadow: 0 0 3px var(--color-box-shadow);
 			border-radius: var(--border-radius-large);
 			overflow: hidden;

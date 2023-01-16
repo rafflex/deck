@@ -3,9 +3,11 @@ js/
 build/
 css/style.css
 css/vendor.css
+cypress/videos/
 tests/integration/vendor/
 tests/integration/composer.lock
 tests/.phpunit.result.cache
 vendor/
 .php_cs.cache
 \.idea/
+settings.json

@@ -86,7 +86,7 @@ class FileService implements IAttachmentService {
 	 * @return ISimpleFolder
 	 * @throws NotPermittedException
 	 */
-	private function getFolder(Attachment $attachment) {
+	public function getFolder(Attachment $attachment) {
 		$folderName = 'file-card-' . (int)$attachment->getCardId();
 		try {
 			$folder = $this->appData->getFolder($folderName);
@@ -219,8 +219,11 @@ class FileService implements IAttachmentService {
 			throw new \Exception('no instance id!');
 		}
 		$name = 'appdata_' . $instanceId;
+		/** @var \OCP\Files\Folder $appDataFolder */
 		$appDataFolder = $this->rootFolder->get($name);
+		/** @var \OCP\Files\Folder $appDataFolder */
 		$appDataFolder = $appDataFolder->get('deck');
+		/** @var \OCP\Files\Folder $cardFolder */
 		$cardFolder = $appDataFolder->get($folderName);
 		return $cardFolder->get($attachment->getData());
 	}

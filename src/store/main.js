@@ -26,15 +26,15 @@ import { loadState } from '@nextcloud/initial-state'
 import Vue from 'vue'
 import Vuex from 'vuex'
 import axios from '@nextcloud/axios'
-import { generateOcsUrl } from '@nextcloud/router'
-import { BoardApi } from '../services/BoardApi'
-import actions from './actions'
-import stack from './stack'
-import card from './card'
-import comment from './comment'
-import trashbin from './trashbin'
-import attachment from './attachment'
-import overview from './overview'
+import { generateOcsUrl, generateUrl } from '@nextcloud/router'
+import { BoardApi } from '../services/BoardApi.js'
+import actions from './actions.js'
+import stack from './stack.js'
+import card from './card.js'
+import comment from './comment.js'
+import trashbin from './trashbin.js'
+import attachment from './attachment.js'
+import overview from './overview.js'
 Vue.use(Vuex)
 
 const apiClient = new BoardApi()
@@ -60,9 +60,8 @@ export default new Vuex.Store({
 	state: {
 		config: loadState('deck', 'config', {}),
 		showArchived: false,
-		navShown: localStorage.getItem('deck.navShown') === 'true',
+		navShown: localStorage.getItem('deck.navShown') === null || localStorage.getItem('deck.navShown') === 'true',
 		compactMode: localStorage.getItem('deck.compactMode') === 'true',
-		cardDetailsInModal: localStorage.getItem('deck.cardDetailsInModal') === 'true',
 		sidebarShown: false,
 		currentBoard: null,
 		currentCard: null,
@@ -78,9 +77,6 @@ export default new Vuex.Store({
 	getters: {
 		config: state => (key) => {
 			return state.config[key]
-		},
-		cardDetailsInModal: state => {
-			return state.cardDetailsInModal
 		},
 		getSearchQuery: state => {
 			return state.searchQuery
@@ -233,10 +229,6 @@ export default new Vuex.Store({
 			state.compactMode = !state.compactMode
 			localStorage.setItem('deck.compactMode', state.compactMode)
 		},
-		setCardDetailsInModal(state) {
-			state.cardDetailsInModal = !state.cardDetailsInModal
-			localStorage.setItem('deck.cardDetailsInModal', state.cardDetailsInModal)
-		},
 		setBoards(state, boards) {
 			state.boards = boards
 		},
@@ -281,7 +273,6 @@ export default new Vuex.Store({
 			labelToUpdate.color = newLabel.color
 		},
 		addLabelToCurrentBoard(state, newLabel) {
-
 			state.currentBoard.labels.push(newLabel)
 		},
 
@@ -392,11 +383,13 @@ export default new Vuex.Store({
 			const storedBoard = await apiClient.updateBoard(board)
 			commit('addBoard', storedBoard)
 		},
-		createBoard({ commit }, boardData) {
-			apiClient.createBoard(boardData)
-				.then((board) => {
-					commit('addBoard', board)
-				})
+		async createBoard({ commit }, boardData) {
+			try {
+				const board = await apiClient.createBoard(boardData)
+				commit('addBoard', board)
+			} catch (err) {
+				return err
+			}
 		},
 		async cloneBoard({ commit }, boardData) {
 			try {
@@ -441,9 +434,6 @@ export default new Vuex.Store({
 		toggleCompactMode({ commit }) {
 			commit('toggleCompactMode')
 		},
-		setCardDetailsInModal({ commit }, show) {
-			commit('setCardDetailsInModal', show)
-		},
 		setCurrentBoard({ commit }, board) {
 			commit('setCurrentBoard', board)
 		},
@@ -474,6 +464,16 @@ export default new Vuex.Store({
 					commit('addLabelToCurrentBoard', newLabel)
 				})
 		},
+		async addLabelToCurrentBoardAndCard({ dispatch, commit }, { newLabel, card }) {
+			newLabel.boardId = this.state.currentBoard.id
+			const label = await apiClient.createLabel(newLabel)
+			commit('addLabelToCurrentBoard', label)
+			dispatch('addLabel', {
+				card,
+				labelId: label.id,
+			})
+			return label
+		},
 
 		// acl actions
 		async addAclToCurrentBoard({ dispatch, commit }, newAcl) {
@@ -496,6 +496,11 @@ export default new Vuex.Store({
 					commit('deleteAclFromCurrentBoard', acl)
 					dispatch('loadBoardById', acl.boardId)
 				})
+		},
+		async transferOwnership({ commit }, { boardId, newOwner }) {
+			await axios.put(generateUrl(`apps/deck/boards/${boardId}/transferOwner`), {
+				newOwner,
+			})
 		},
 	},
 })

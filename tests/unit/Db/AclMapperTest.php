@@ -23,15 +23,18 @@
 
 namespace OCA\Deck\Db;
 
+use OCA\Deck\Service\CirclesService;
+use OCP\IDBConnection;
 use OCP\IGroupManager;
 use OCP\IUserManager;
+use OCP\Server;
 use Psr\Log\LoggerInterface;
-use Test\AppFramework\Db\MapperTestUtility;
+use Test\TestCase;
 
 /**
  * @group DB
  */
-class AclMapperTest extends MapperTestUtility {
+class AclMapperTest extends TestCase {
 	private $dbConnection;
 	private $aclMapper;
 	private $boardMapper;
@@ -45,17 +48,18 @@ class AclMapperTest extends MapperTestUtility {
 	public function setup(): void {
 		parent::setUp();
 
-		$this->dbConnection = \OC::$server->getDatabaseConnection();
+		$this->dbConnection = Server::get(IDBConnection::class);
 		$this->aclMapper = new AclMapper($this->dbConnection);
 		$this->userManager = $this->createMock(IUserManager::class);
 		$this->groupManager = $this->createMock(IGroupManager::class);
 		$this->boardMapper = new BoardMapper(
 			$this->dbConnection,
-			\OC::$server->query(LabelMapper::class),
+			Server::get(LabelMapper::class),
 			$this->aclMapper,
-			\OC::$server->query(StackMapper::class),
+			Server::get(StackMapper::class),
 			$this->userManager,
 			$this->groupManager,
+			$this->createMock(CirclesService::class),
 			$this->createMock(LoggerInterface::class)
 		);
 
@@ -65,10 +69,10 @@ class AclMapperTest extends MapperTestUtility {
 			$this->boardMapper->insert($this->getBoard('MyBoard 3', 'user3'))
 		];
 		$this->acls = [
-			$this->aclMapper->insert($this->getAcl('user','user1', false, false, false, $this->boards[1]->getId())),
-			$this->aclMapper->insert($this->getAcl('user','user2', true, false, false, $this->boards[0]->getId())),
-			$this->aclMapper->insert($this->getAcl('user','user3', true, true, false, $this->boards[0]->getId())),
-			$this->aclMapper->insert($this->getAcl('user','user1', false, false, false, $this->boards[2]->getId()))
+			$this->aclMapper->insert($this->getAcl('user', 'user1', false, false, false, $this->boards[1]->getId())),
+			$this->aclMapper->insert($this->getAcl('user', 'user2', true, false, false, $this->boards[0]->getId())),
+			$this->aclMapper->insert($this->getAcl('user', 'user3', true, true, false, $this->boards[0]->getId())),
+			$this->aclMapper->insert($this->getAcl('user', 'user1', false, false, false, $this->boards[2]->getId()))
 		];
 
 		foreach ($this->acls as $acl) {

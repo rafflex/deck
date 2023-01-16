@@ -33,6 +33,8 @@ use OCA\Deck\Db\Label;
 use OCA\Deck\Db\LabelMapper;
 use OCA\Deck\Db\Stack;
 use OCA\Deck\Db\StackMapper;
+use OCA\Deck\Validators\StackServiceValidator;
+use Psr\Log\LoggerInterface;
 use \Test\TestCase;
 
 /**
@@ -67,6 +69,10 @@ class StackServiceTest extends TestCase {
 	private $activityManager;
 	/** @var ChangeHelper|\PHPUnit\Framework\MockObject\MockObject */
 	private $changeHelper;
+	/** @var LoggerInterface|\PHPUnit\Framework\MockObject\MockObject */
+	private $logger;
+	/** @var StackServiceValidator|\PHPUnit\Framework\MockObject\MockObject */
+	private $stackServiceValidator;
 
 	public function setUp(): void {
 		parent::setUp();
@@ -81,6 +87,8 @@ class StackServiceTest extends TestCase {
 		$this->labelMapper = $this->createMock(LabelMapper::class);
 		$this->activityManager = $this->createMock(ActivityManager::class);
 		$this->changeHelper = $this->createMock(ChangeHelper::class);
+		$this->logger = $this->createMock(LoggerInterface::class);
+		$this->stackServiceValidator = $this->createMock(StackServiceValidator::class);
 
 		$this->stackService = new StackService(
 			$this->stackMapper,
@@ -93,7 +101,9 @@ class StackServiceTest extends TestCase {
 			$this->assignedUsersMapper,
 			$this->attachmentService,
 			$this->activityManager,
-			$this->changeHelper
+			$this->changeHelper,
+			$this->logger,
+			$this->stackServiceValidator
 		);
 	}
 
@@ -195,7 +205,7 @@ class StackServiceTest extends TestCase {
 	}
 
 	public function testUpdate() {
-		$this->permissionService->expects($this->once())->method('checkPermission');
+		$this->permissionService->expects($this->exactly(2))->method('checkPermission');
 		$stack = new Stack();
 		$this->stackMapper->expects($this->once())->method('find')->willReturn($stack);
 		$this->stackMapper->expects($this->once())->method('update')->willReturn($stack);

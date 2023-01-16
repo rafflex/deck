@@ -27,33 +27,50 @@ use OCA\Deck\Db\Attachment;
 use OCA\Deck\Db\AttachmentMapper;
 use OCA\Deck\Db\Board;
 use OCA\Deck\Db\BoardMapper;
+use OCA\Deck\Db\Card;
+use OCA\Deck\Db\CardMapper;
 use OCA\Deck\InvalidAttachmentType;
 use OCA\Deck\Service\AttachmentService;
 use OCA\Deck\Service\IAttachmentService;
+use OCP\AppFramework\Utility\ITimeFactory;
+use PHPUnit\Framework\MockObject\MockObject;
+use Test\TestCase;
 
-class DeleteCronTest extends \Test\TestCase {
+class DeleteCronTest extends TestCase {
 
-	/** @var BoardMapper|\PHPUnit\Framework\MockObject\MockObject */
+	/** @var ITimeFactory|MockObject */
+	private $timeFactory;
+	/** @var BoardMapper|MockObject */
 	protected $boardMapper;
+	/** @var CardMapper|\PHPUnit\Framework\MockObject\MockObject */
+	protected $cardMapper;
 	/** @var AttachmentService|\PHPUnit\Framework\MockObject\MockObject */
 	private $attachmentService;
-	/** @var AttachmentMapper|\PHPUnit\Framework\MockObject\MockObject */
+	/** @var AttachmentMapper|MockObject */
 	private $attachmentMapper;
 	/** @var DeleteCron */
 	protected $deleteCron;
 
 	public function setUp(): void {
 		parent::setUp();
+		$this->timeFactory = $this->createMock(ITimeFactory::class);
 		$this->boardMapper = $this->createMock(BoardMapper::class);
+		$this->cardMapper = $this->createMock(CardMapper::class);
 		$this->attachmentService = $this->createMock(AttachmentService::class);
 		$this->attachmentMapper = $this->createMock(AttachmentMapper::class);
-		$this->deleteCron = new DeleteCron($this->boardMapper, $this->attachmentService, $this->attachmentMapper);
+		$this->deleteCron = new DeleteCron($this->timeFactory, $this->boardMapper, $this->cardMapper, $this->attachmentService, $this->attachmentMapper);
 	}
 
 	protected function getBoard($id) {
 		$board = new Board();
 		$board->setId($id);
 		return $board;
+	}
+
+	protected function getCard($id) {
+		$card = new Card();
+		$card->setId($id);
+		return $card;
 	}
 
 	public function testDeleteCron() {
@@ -66,18 +83,22 @@ class DeleteCronTest extends \Test\TestCase {
 		$this->boardMapper->expects($this->once())
 			->method('findToDelete')
 			->willReturn($boards);
-		$this->boardMapper->expects($this->at(1))
+		$this->boardMapper->expects($this->exactly(count($boards)))
 			->method('delete')
-			->with($boards[0]);
-		$this->boardMapper->expects($this->at(2))
+			->withConsecutive(
+				[$boards[0]],
+				[$boards[1]],
+				[$boards[2]],
+				[$boards[3]]
+			);
+
+		$cards = [ $this->getCard(10) ];
+		$this->cardMapper->expects($this->once())
+			->method('findToDelete')
+			->willReturn($cards);
+		$this->cardMapper->expects($this->once())
 			->method('delete')
-			->with($boards[1]);
-		$this->boardMapper->expects($this->at(3))
-			->method('delete')
-			->with($boards[2]);
-		$this->boardMapper->expects($this->at(4))
-			->method('delete')
-			->with($boards[3]);
+			->with($cards[0]);
 
 		$attachment = new Attachment();
 		$attachment->setType('deck_file');
@@ -104,6 +125,10 @@ class DeleteCronTest extends \Test\TestCase {
 		$this->boardMapper->expects($this->once())
 			->method('findToDelete')
 			->willReturn($boards);
+
+		$this->cardMapper->expects($this->once())
+			->method('findToDelete')
+			->willReturn([]);
 
 		$attachment = new Attachment();
 		$attachment->setType('deck_file_invalid');

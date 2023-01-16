@@ -27,19 +27,20 @@
 				<div class="avatardiv icon-more" />
 			</div>
 			<div v-for="user in firstUsers" :key="user.id">
-				<Avatar v-if="user.type === 0"
+				<NcAvatar v-if="user.type === 0"
 					:user="user.participant.uid"
 					:display-name="user.participant.displayname"
 					:disable-menu="true"
+					:show-user-status="false"
 					:size="32" />
-				<Avatar v-if="user.type === 1"
+				<NcAvatar v-if="user.type === 1"
 					:user="user.participant.uid"
 					:display-name="user.participant.displayname"
 					:tooltip-message="user.participant.displayname + ' ' + t('deck', '(Group)')"
 					:is-no-user="true"
 					:disable-="true"
 					:size="32" />
-				<Avatar v-if="user.type === 7"
+				<NcAvatar v-if="user.type === 7"
 					:user="user.participant.uid"
 					:display-name="user.participant.displayname"
 					:tooltip-message="user.participant.displayname + ' ' + t('deck', '(Circle)')"
@@ -50,14 +51,13 @@
 		</div>
 
 		<div v-show="popoverVisible" class="popovermenu menu-right">
-			<PopoverMenu :menu="popover" />
+			<NcPopoverMenu :menu="popover" />
 			<slot />
 		</div>
 
 		<div class="avatar-print-list">
 			<div v-for="user in avatarUsers" :key="user.id" class="avatar-print-list-item">
-				<Avatar
-					class="avatar-print-list-avatar"
+				<NcAvatar class="avatar-print-list-avatar"
 					:user="user.participant.uid"
 					:display-name="user.participant.displayname"
 					:disable-menu="true"
@@ -70,14 +70,14 @@
 </template>
 
 <script>
-import { Avatar, PopoverMenu, Tooltip } from '@nextcloud/vue'
+import { NcAvatar, NcPopoverMenu, Tooltip } from '@nextcloud/vue'
 import { generateUrl } from '@nextcloud/router'
 
 export default {
 	name: 'AvatarList',
 	components: {
-		Avatar,
-		PopoverMenu,
+		NcAvatar,
+		NcPopoverMenu,
 	},
 	directives: {
 		tooltip: Tooltip,
@@ -154,7 +154,7 @@ export default {
 		margin-top: 5px;
 		position: relative;
 		flex-grow: 1;
-		::v-deep .popovermenu {
+		:deep(.popovermenu) {
 			margin-right: -4px;
 			img {
 				padding: 0;
@@ -174,7 +174,7 @@ export default {
 		padding-right: $avatar-offset;
 		flex-direction: row-reverse;
 		.avatardiv,
-		::v-deep .avatardiv {
+		:deep(.avatardiv) {
 			width: 36px;
 			height: 36px;
 			box-sizing: content-box !important;
@@ -189,7 +189,7 @@ export default {
 				cursor: pointer;
 			}
 		}
-		&:hover div:nth-child(n+2) ::v-deep .avatardiv {
+		&:hover div:nth-child(n+2) :deep(.avatardiv) {
 			margin-right: 1px;
 		}
 	}

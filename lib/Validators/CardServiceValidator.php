@@ -1,11 +1,10 @@
-/*
+<?php
+/**
  * @copyright Copyright (c) 2016 Julius Härtl <jus@bitgrid.net>
  *
  * @author Julius Härtl <jus@bitgrid.net>
- * @author Artem Anufrij <artem.anufrij@live.de>
- * @author Marin Treselj <marin@pixelipo.com>
- * @author Oskar Kurz <oskar.kurz@gmail.com>
- * @author Ryan Fletcher <ryan.fletcher@codepassion.ca>
+ * @author Maxence Lange <maxence@artificial-owl.com>
+ * @author Luka Trovic <luka.trovic@nextcloud.com>
  *
  * @license GNU AGPL version 3 or any later version
  *
@@ -24,5 +23,22 @@
  *
  */
 
-@import 'icons';
-@import 'print';
+declare(strict_types=1);
+
+namespace OCA\Deck\Validators;
+
+class CardServiceValidator extends BaseValidator {
+	public function rules() {
+		return [
+			'id' => ['numeric'],
+			'title' => ['not_empty', 'not_null', 'not_false', 'max:255'],
+			'cardId' => ['numeric'],
+			'stackId' => ['numeric'],
+			'boardId' => ['numeric'],
+			'labelId' => ['numeric'],
+			'type' => ['not_empty', 'not_null', 'not_false', 'max:64'],
+			'order' => ['numeric'],
+			'owner' => ['not_empty', 'not_null', 'not_false', 'max:64'],
+		];
+	}
+}

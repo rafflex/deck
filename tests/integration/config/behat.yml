@@ -9,4 +9,6 @@ default:
         - RequestContext
         - BoardContext
         - CommentContext
+        - AttachmentContext
         - SearchContext
+        - SessionContext

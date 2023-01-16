@@ -21,7 +21,7 @@
   -->
 
 <template>
-	<router-view v-if="visible" name="sidebar" />
+	<router-view v-if="visible" v-click-outside="onClickOutside" name="sidebar" />
 </template>
 
 <script>
@@ -37,6 +37,11 @@ export default {
 		closeSidebar() {
 			this.$router.push({ name: 'board' })
 		},
+		onClickOutside(e) {
+			if (e.target?.dataset?.clickClosesSidebar) {
+				this.closeSidebar()
+			}
+		},
 	},
 }
 </script>
@@ -44,5 +49,9 @@ export default {
 <style lang="scss">
 	#app-sidebar .icon-close {
 		z-index: 100;
+	}
+
+	.app-deck .app-sidebar {
+		z-index: 1500 !important;
 	}
 </style>
